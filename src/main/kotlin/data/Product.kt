@@ -1,27 +1,34 @@
 package main.data
 
-import java.io.Serializable
+import main.utils.SerializationService
+import org.springframework.core.convert.converter.Converter
+import org.springframework.data.convert.ReadingConverter
+import org.springframework.data.convert.WritingConverter
 import java.util.*
-
-@JvmInline
-value class ProductId(val value: UUID) : Serializable
-
-@JvmInline
-value class ProductName(val value: String)
-
-@JvmInline
-value class ProductDescription(val value: String)
-
-@JvmInline
-value class Stock(val value: Int)
 
 /**
  * Модель данных для товаров.
  */
 data class Product(
-    val id: ProductId,
-    val name: ProductName,
-    val description: ProductDescription,
+    val id: UUID,
+    val name: String,
+    val description: String,
     val price: Money,
-    val stock: Stock
+    val stock: Int
 )
+
+@WritingConverter
+class ProductListToStringConverter(
+    private val json: SerializationService
+) : Converter<List<Product>, String> {
+    override fun convert(source: List<Product>): String =
+        json.serializeToString(source)
+}
+
+@ReadingConverter
+class StringToProductListConverter(
+    private val json: SerializationService
+) : Converter<String, List<Product>> {
+    override fun convert(source: String): List<Product> =
+        json.deserializeFromString(source, Array<Product>::class.java).toList()
+}

@@ -1,20 +1,41 @@
-version: '3.8'
-
 services:
-  cassandra:
-    image: cassandra:4.1
+  cassandra-container:
+    image: cassandra:5.0
     container_name: cassandra-container
+    environment:
+      - CASSANDRA_CLUSTER_NAME=dissertation_cluster
+      - CASSANDRA_DC=datacenter1
+      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
+      - CASSANDRA_AUTHENTICATOR=AllowAllAuthenticator
+      - CASSANDRA_AUTHORIZER=AllowAllAuthorizer
     ports:
       - "9042:9042"
-    networks:
-      - cassandra-network
-    environment:
-      CASSANDRA_CLUSTER_NAME: DissertationCluster
-      CASSANDRA_NUM_TOKENS: 256
-      MAX_HEAP_SIZE: 5120M
-      HEAP_NEWSIZE: 1000M
     volumes:
       - cassandra_data:/var/lib/cassandra
+    healthcheck:
+      test: [ "CMD-SHELL", "cqlsh -u cassandra -p cassandra -e 'describe cluster' || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      cassandra-network:
+        aliases:
+          - cassandra
+
+  cassandra-init:
+    image: cassandra:5.0
+    depends_on:
+      cassandra-container:
+        condition: service_healthy
+    networks:
+      - cassandra-network
+    volumes:
+      - ./init:/init
+    entrypoint: >
+      sh -c "
+        echo '==== Cassandra is up, running init scripts ====' &&
+        cqlsh cassandra 9042 -u cassandra -p cassandra -f /init/create-keyspace.cql
+      "
 
 networks:
   cassandra-network:

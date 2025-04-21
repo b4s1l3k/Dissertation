@@ -1,42 +1,54 @@
 package main
 
+import main.benchmark.CassandraFindAllBenchmark
 import main.config.ApplicationProperties
 import main.config.ApplicationTypes
-//import main.runner.CassandraDataGenerationAndCompressionRunner
-import main.runner.DataCompressionRunner
-import main.runner.DataGenerationRunner
+import main.config.BenchmarkType
+import main.config.GeneratingProperties
+import main.runner.CassandraCompressedRunner
+import main.runner.PreCompressedRunner
 import org.springframework.boot.CommandLineRunner
-import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component
 
-@Order(1)
 @Component
 class Application(
-    private val applicationProperties: ApplicationProperties,
-    private val dataCompressionRunner: DataCompressionRunner,
-    private val dataGenerationRunner: DataGenerationRunner,
-//    private val cassandraDataGenerationAndCompressionRunner: CassandraDataGenerationAndCompressionRunner
+    private val props: ApplicationProperties,
+    private val preCompressedRunner: PreCompressedRunner,
+    private val cassandraCompressedRunner: CassandraCompressedRunner,
+    private val pageSizeBenchmark: CassandraFindAllBenchmark,
+    private val generatingProps: GeneratingProperties
 ) : CommandLineRunner {
 
     override fun run(vararg args: String?) {
-        when (applicationProperties.applicationType.type) {
-            ApplicationTypes.cassandra -> {
-                println("Режим: запись данных в Cassandra")
-//                cassandraDataGenerationAndCompressionRunner.generateAndProcessDataForAllCompressionTypes()
+        when (props.type) {
+            ApplicationTypes.preCompressed ->
+                preCompressedRunner.preCompresedRun(
+                    props.count,
+                    generatingProps.perCall,
+                    props.randomCount
+                )
+
+            ApplicationTypes.cassandraCompressed ->
+                cassandraCompressedRunner.cassandraCompressedRun(
+                    props.count,
+                    generatingProps.perCall,
+                    props.randomCount
+                )
+
+            ApplicationTypes.benchmark -> when (props.benchmarkType) {
+                BenchmarkType.pageSize ->
+                    pageSizeBenchmark.runBenchmark(
+                        ordersCount = props.count,
+                        perCall     = generatingProps.perCall,
+                        randomCount = props.randomCount
+                    )
+
+                BenchmarkType.parallelism ->
+                    println("Benchmark 'parallelism' пока не реализован")
             }
-            ApplicationTypes.generating -> {
-                println("Режим: генерация данных без сжатия")
-                dataGenerationRunner.generateAllData()
-            }
-            ApplicationTypes.compression -> {
-                println("Режим: только сжатие данных")
-                dataCompressionRunner.compressAllData()
-            }
-            ApplicationTypes.generatingPlusCompression -> {
-                println("Режим: генерация данных и их сжатие")
-                dataGenerationRunner.generateAllData()
-                dataCompressionRunner.compressAllData()
-            }
+
+            else ->
+                println("Тип приложения ${props.type} пока не реализован")
         }
     }
 }

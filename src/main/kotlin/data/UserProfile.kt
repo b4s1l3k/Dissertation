@@ -1,16 +1,13 @@
 package main.data
 
-import main.service.compression.utils.CompressionProtocolFactoryImpl.CompressionType
-import org.springframework.data.annotation.Id
-import org.springframework.data.cassandra.core.mapping.Table
-import java.io.Serializable
+import main.utils.SerializationService
+import org.springframework.core.convert.converter.Converter
+import org.springframework.data.convert.ReadingConverter
+import org.springframework.data.convert.WritingConverter
 import java.time.Instant
 
-@JvmInline
-value class UserId(val value: String) : Serializable
 
-@JvmInline
-value class UserEmail(val value: String) {
+data class UserEmail(val value: String) {
     init {
         require(value.matches(Regex("^[A-Za-z0-9+_.'-]+@[A-Za-z0-9.-]+$"))) {
             "Invalid email address: $value"
@@ -18,11 +15,6 @@ value class UserEmail(val value: String) {
     }
 }
 
-@JvmInline
-value class UserPhone(val value: String)
-
-@JvmInline
-value class UserAddress(val value: String)
 
 enum class Gender {
     MALE,
@@ -35,14 +27,30 @@ enum class Gender {
  * Модель данных для профиля пользователя.
  */
 data class UserProfile(
-    val id: UserId,
-    val name: UserName,
+    val id: String,
+    val name: String,
     val email: UserEmail,
-    val phone: UserPhone? = null,
-    val address: UserAddress? = null,
+    val phone: String? = null,
+    val address: String? = null,
     val birthDate: Long? = null,
     val gender: Gender? = null,
     val createdAt: Long = Instant.now().toEpochMilli(),
     val lastUpdatedAt: Long = Instant.now().toEpochMilli(),
     val preferences: Map<String, String> = emptyMap()
 )
+
+@WritingConverter
+class UserProfileToStringConverter(
+    private val json: SerializationService
+) : Converter<UserProfile, String> {
+    override fun convert(source: UserProfile): String =
+        json.serializeToString(source)
+}
+
+@ReadingConverter
+class StringToUserProfileConverter(
+    private val json: SerializationService
+) : Converter<String, UserProfile> {
+    override fun convert(source: String): UserProfile =
+        json.deserializeFromString(source, UserProfile::class.java)
+}

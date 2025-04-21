@@ -3,31 +3,27 @@ spring:
     web-application-type: none
   data:
     cassandra:
-      contact-points: cassandra-container
+      contact-points: 127.0.0.1
       port: 9042
       keyspace-name: dissertation
-      schema-action: create-if-not-exists
-      username: cassandra
-      password: cassandra
       local-datacenter: datacenter1
+      schema-action: create-if-not-exists
+
+generating:
+  perCall: 150
 
 compression:
   lz4:
     blockSize: 65536
   snappy:
-    blockSize: 6553600
+    blockSize: 65536
   zstd:
     compressionLevel: 1
     enableChecksum: false
 
-generating:
-  userProfiles:
-    count: 1000000
-  payments:
-    count: 1000000
-  orders:
-    count: 1000000
-
 application:
-  applicationType:
-    type: compression # cassandra, generating, compression, generatingPlusCompression
+  type: benchmark # nonCompressed, onlyPreCompressed, preCompressed, cassandraCompressed, benchmark
+  count: 600000
+  benchmarkType: pageSize # pageSize, parallelism
+  randomCount: false
+  perTime: false # TBD

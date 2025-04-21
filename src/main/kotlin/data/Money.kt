@@ -1,11 +1,14 @@
 package main.data
 
+import main.utils.SerializationService
+import org.springframework.core.convert.converter.Converter
+import org.springframework.data.convert.ReadingConverter
+import org.springframework.data.convert.WritingConverter
 import java.math.BigDecimal
 import java.math.RoundingMode
 
 
-@JvmInline
-value class MoneyAmount(val value: BigDecimal) {
+data class MoneyAmount(val value: BigDecimal) {
     init {
         require(value >= BigDecimal.ZERO) { "Amount must be non-negative" }
     }
@@ -21,8 +24,22 @@ value class MoneyAmount(val value: BigDecimal) {
     }
 }
 
-@JvmInline
-value class MoneyCurrency(val value: Currency)
-
+data class MoneyCurrency(val value: Currency)
 
 data class Money(val moneyAmount: MoneyAmount, val currency: MoneyCurrency)
+
+@WritingConverter
+class MoneyToStringConverter(
+    private val json: SerializationService
+) : Converter<Money, String> {
+    override fun convert(source: Money): String =
+        json.serializeToString(source)
+}
+
+@ReadingConverter
+class StringToMoneyConverter(
+    private val json: SerializationService
+) : Converter<String, Money> {
+    override fun convert(source: String): Money =
+        json.deserializeFromString(source, Money::class.java)
+}

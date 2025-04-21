@@ -1,34 +1,35 @@
 package main.service.cassandra
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import main.data.OrderInfo
-import main.utils.JsonSerializationService
 import org.springframework.data.cassandra.repository.CassandraRepository
+import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 
 @Service
 class SimpleCassandraService(
-    private val orderInfoRepository: CassandraRepository<OrderInfo, String>,
-    private val jsonSerializationService: JsonSerializationService
-) {
+    private val repository: CassandraRepository<OrderInfo, String>
+) : CassandraService {
 
-    /**
-     * Сохранить заказ в Cassandra.
-     */
-    fun saveOrders(order: OrderInfo) {
-        orderInfoRepository.save(order)
+    override suspend fun save(entities: List<OrderInfo>): Unit = withContext(Dispatchers.IO) {
+        println("Сохраняется ${entities.size} записей")
+        repository.saveAll(entities)
     }
 
-    /**
-     * Найти заказ по ID.
-     */
-    fun findById(id: String): OrderInfo? {
-        return orderInfoRepository.findById(id).orElse(null)
+    override suspend fun findById(id: String): OrderInfo? = withContext(Dispatchers.IO) {
+        repository.findById(id).orElse(null)
     }
 
-    /**
-     * Получить все заказы.
-     */
-    fun findAll(): List<OrderInfo> {
-        return orderInfoRepository.findAll()
+    override suspend fun findAll(pageSize: Int): Unit = withContext(Dispatchers.IO) {
+        var page = repository.findAll(PageRequest.of(0, pageSize))
+        while (true) {
+            if (!page.hasNext()) break
+            page = repository.findAll(page.nextPageable())
+        }
+    }
+
+    override suspend fun deleteAll(): Unit = withContext(Dispatchers.IO) {
+        repository.deleteAll()
     }
 }

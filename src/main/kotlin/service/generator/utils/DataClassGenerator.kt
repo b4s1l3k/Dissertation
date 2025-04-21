@@ -8,7 +8,6 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Instant
 import java.util.*
-import kotlin.collections.List
 import kotlin.random.Random
 
 interface DataClassGenerator {
@@ -26,7 +25,7 @@ class DataClassGeneratorImpl : DataClassGenerator {
      */
     override fun generateOrderInfo(): OrderInfo {
         return OrderInfo(
-            id = OrderId(Random.nextInt().toString()),
+            id = UUID.randomUUID().toString(),
             user = generateUserProfile(),
             payment = generatePayment(),
             product = generateProducts(),
@@ -42,10 +41,10 @@ class DataClassGeneratorImpl : DataClassGenerator {
             ),
             status = OrderStatus.entries.toTypedArray().random(),
             deliveryMethod = DeliveryMethod.entries.toTypedArray().randomOrNull(),
-            deliveryAddress = nullOrAddress()?.let { UserAddress(it) },
+            deliveryAddress = nullOrAddress(),
             estimatedDeliveryDate = nullOrTime(),
             trackingNumber = nullOrString(),
-            paymentId = PaymentId(UUID.randomUUID()),
+            paymentId = UUID.randomUUID(),
             discountAmount = nullOrMoney(),
             taxAmount = nullOrMoney(),
             metadata = mapOf(
@@ -60,11 +59,11 @@ class DataClassGeneratorImpl : DataClassGenerator {
      */
     override fun generateUserProfile(): UserProfile {
         return UserProfile(
-            id = UserId(UUID.randomUUID().toString()),
-            name = UserName(faker.name.name()),
+            id = UUID.randomUUID().toString(),
+            name = faker.name.name(),
             email = UserEmail(faker.internet.email()),
-            phone = nullOrPhone()?.let { UserPhone(it) },
-            address = nullOrAddress()?.let { UserAddress(it) },
+            phone = nullOrPhone(),
+            address = nullOrAddress(),
             birthDate = nullOrTime(),
             gender = Gender.entries.toTypedArray().randomOrNull(),
             createdAt = Instant.now().toEpochMilli(),
@@ -78,7 +77,7 @@ class DataClassGeneratorImpl : DataClassGenerator {
      */
     override fun generatePayment(): Payment {
         return Payment(
-            id = PaymentId(UUID.randomUUID()),
+            id = UUID.randomUUID(),
             amount = Money(
                 moneyAmount = MoneyAmount(
                     BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(
@@ -91,10 +90,10 @@ class DataClassGeneratorImpl : DataClassGenerator {
             status = PaymentStatus.entries.toTypedArray().random(),
             method = PaymentMethod.entries.toTypedArray().random(),
             description = nullOrString(),
-            recipientName = nullOrName()?.let { AccountNumber(it) },
-            recipientAccount = nullOrLong()?.let { AccountNumber(it.toString()) },
-            senderName = nullOrName()?.let { UserName(it) },
-            senderAccount = nullOrLong()?.let { AccountNumber(it.toString()) },
+            recipientName = nullOrName(),
+            recipientAccount = nullOrLong(),
+            senderName = nullOrName(),
+            senderAccount = nullOrLong(),
             transactionFee = Money(
                 moneyAmount = MoneyAmount(
                     BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(
@@ -117,7 +116,7 @@ class DataClassGeneratorImpl : DataClassGenerator {
                 "order_id" to UUID.randomUUID().toString(),
                 "note" to nullOrString().orEmpty()
             ),
-            invoiceNumber = nullOrLong()?.let { AccountNumber(it.toString()) },
+            invoiceNumber = nullOrLong(),
             confirmationCode = nullOrString(),
             scheduledDate = nullOrTime(),
             expirationDate = nullOrTime()
@@ -130,9 +129,9 @@ class DataClassGeneratorImpl : DataClassGenerator {
     fun generateProducts(): List<Product> {
         return List(Random.nextInt(1, 100)) {
             Product(
-                id = ProductId(UUID.randomUUID()),
-                name = ProductName(faker.commerce.productName()),
-                description = ProductDescription(faker.fallout.quotes()),
+                id = UUID.randomUUID(),
+                name = faker.commerce.productName(),
+                description = faker.fallout.quotes(),
                 price = Money(
                     moneyAmount = MoneyAmount(
                         BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(
@@ -142,7 +141,7 @@ class DataClassGeneratorImpl : DataClassGenerator {
                     ),
                     currency = MoneyCurrency(Currency.entries.toTypedArray().random())
                 ),
-                stock = Stock(Random.nextInt(0, 100))
+                stock = Random.nextInt(0, 100)
             )
         }
     }

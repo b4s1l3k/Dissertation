@@ -5,17 +5,45 @@ import org.springframework.stereotype.Component
 
 @Component
 @ConfigurationProperties(prefix = "application")
-data class ApplicationProperties(
-    var applicationType: ApplicationType = ApplicationType()
-)
+class ApplicationProperties {
+    /**
+     * Тип запуска приложения
+     * (из application.type)
+     */
+    var type: ApplicationTypes = ApplicationTypes.preCompressed
 
-data class ApplicationType(
-    var type: ApplicationTypes = ApplicationTypes.generatingPlusCompression
-)
+    /**
+     * Количество заказов
+     * (из application.count)
+     */
+    var count: Int = 60000
+
+    /**
+     * Тип бенчмарка
+     * (из application.benchmarkType)
+     */
+    var benchmarkType: BenchmarkType = BenchmarkType.pageSize
+
+    /**
+     * application.randomCount
+     */
+    var randomCount: Boolean = false
+
+    /**
+     * application.perTime
+     */
+    var perTime: Boolean = false
+}
 
 enum class ApplicationTypes {
-    cassandra,
-    generating,
-    compression,
-    generatingPlusCompression
+    preCompressed,
+    nonCompressed,
+    cassandraCompressed,
+    onlyPreCompressed,
+    benchmark
+}
+
+enum class BenchmarkType {
+    pageSize,
+    parallelism
 }
