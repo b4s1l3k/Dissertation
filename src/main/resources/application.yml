@@ -8,6 +8,8 @@ spring:
       keyspace-name: dissertation
       local-datacenter: datacenter1
       schema-action: create-if-not-exists
+      jmx-host: localhost
+      jmx-port: 7199
 
 generating:
   perCall: 150

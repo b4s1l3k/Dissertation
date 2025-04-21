@@ -32,9 +32,8 @@ class DatabaseInitializer(
                 metadata map<text, text>
             )
             WITH compression = {
-                'class'             : 'org.apache.cassandra.io.compress.ZstdCompressor',
-                'chunk_length_in_kb': '256',
-                'compression_level' : '22'
+                'class'             : 'org.apache.cassandra.io.compress.DeflateCompressor',
+                'chunk_length_in_kb': '64'
             }
             AND crc_check_chance = 0.1
             """.trimIndent()
@@ -47,9 +46,8 @@ class DatabaseInitializer(
                 compressed_payload blob
             )
             WITH compression = {
-                'class'             : 'org.apache.cassandra.io.compress.ZstdCompressor',
-                'chunk_length_in_kb': '256',
-                'compression_level' : '22'
+                'class'             : 'org.apache.cassandra.io.compress.DeflateCompressor',
+                'chunk_length_in_kb': '64'
             }
             AND crc_check_chance = 0.1
             """.trimIndent()

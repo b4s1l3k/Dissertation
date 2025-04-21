@@ -3,17 +3,26 @@ services:
     image: cassandra:5.0
     container_name: cassandra-container
     environment:
-      - CASSANDRA_CLUSTER_NAME=dissertation_cluster
-      - CASSANDRA_DC=datacenter1
-      - CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch
-      - CASSANDRA_AUTHENTICATOR=AllowAllAuthenticator
-      - CASSANDRA_AUTHORIZER=AllowAllAuthorizer
+      CASSANDRA_CLUSTER_NAME: dissertation_cluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_AUTHENTICATOR: AllowAllAuthenticator
+      CASSANDRA_AUTHORIZER: AllowAllAuthorizer
+      JVM_EXTRA_OPTS: >
+        -Dcom.sun.management.jmxremote
+        -Dcom.sun.management.jmxremote.port=7199
+        -Dcom.sun.management.jmxremote.rmi.port=7199
+        -Dcom.sun.management.jmxremote.authenticate=false
+        -Dcom.sun.management.jmxremote.ssl=false
+        -Dcom.sun.management.jmxremote.local.only=false 
+        -Djava.rmi.server.hostname=localhost
     ports:
       - "9042:9042"
+      - "7199:7199"
     volumes:
       - cassandra_data:/var/lib/cassandra
     healthcheck:
-      test: [ "CMD-SHELL", "cqlsh -u cassandra -p cassandra -e 'describe cluster' || exit 1" ]
+      test: ["CMD-SHELL", "cqlsh -u cassandra -p cassandra -e 'describe cluster' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

@@ -6,6 +6,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import main.data.SimpleOrderInfo
 import main.service.cassandra.CassandraService
+import main.service.cassandra.utils.TableSizeReporter
 import main.service.generator.DataGenerationService
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Service
@@ -15,7 +16,7 @@ import kotlin.system.exitProcess
 import kotlin.system.measureTimeMillis
 
 private const val THREADS = 10
-private val PageSizes = listOf(500, 1000, 5000, 10_000)
+private val PageSizes = listOf(100, 500, 1000, 2000, 5000)
 
 @Service
 class CassandraFindAllBenchmark(
@@ -32,6 +33,8 @@ class CassandraFindAllBenchmark(
 
     @Qualifier("preCompressedCassandraService")
     private val preCompressed: CassandraService<SimpleOrderInfo>,
+
+    private val tableSizeReporter: TableSizeReporter
 ) {
 
     fun runBenchmark(
@@ -43,7 +46,8 @@ class CassandraFindAllBenchmark(
 
         summary["Simple"] = benchmark("Simple", simple, ordersCount, perCall, randomCount)
         summary["Compressed"] = benchmark("Compressed", compressed, ordersCount, perCall, randomCount)
-        summary["OnlyCompressed"] = benchmark("OnlyCompressed", onlyCompressed, ordersCount, perCall, randomCount)
+        summary["OnlyCompressed"] =
+            benchmark("OnlyCassandraCompressed", onlyCompressed, ordersCount, perCall, randomCount)
         summary["PreCompressed"] = benchmark("PreCompressed", preCompressed, ordersCount, perCall, randomCount)
 
         println("\n=== Сводные результаты ===")
@@ -59,6 +63,13 @@ class CassandraFindAllBenchmark(
             }
             println()
         }
+
+        tableSizeReporter.reportTableSizes(
+            "simple_order_info",
+            "cassandra_order_info",
+            "compressed_order_info",
+            "precompressed_order_info"
+        )
 
         println("\nBenchmark завершён.")
         exitProcess(0)

@@ -11,5 +11,7 @@ data class CassandraProperties(
     var keyspace: String = "dissertation",
     var username: String = "cassandra",
     var password: String = "cassandra",
+    var jmxHost: String = "localhost",
+    var jmxPort: Int = 7199,
     var localDatacenter: String = "datacenter1"
 )
