@@ -13,7 +13,7 @@ import kotlin.random.Random
 interface DataClassGenerator {
     fun generateUserProfile(): UserProfile
     fun generatePayment(): Payment
-    fun generateOrderInfo(): OrderInfo
+    fun generateOrderInfo(): SimpleOrderInfo
 }
 
 @Component
@@ -23,8 +23,8 @@ class DataClassGeneratorImpl : DataClassGenerator {
     /**
      * Генерация случайного заказа.
      */
-    override fun generateOrderInfo(): OrderInfo {
-        return OrderInfo(
+    override fun generateOrderInfo(): SimpleOrderInfo {
+        return SimpleOrderInfo(
             id = UUID.randomUUID().toString(),
             user = generateUserProfile(),
             payment = generatePayment(),

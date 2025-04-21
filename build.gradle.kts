@@ -41,6 +41,7 @@ dependencies {
     implementation("org.xerial.snappy:snappy-java:1.1.10.7")
     implementation("com.github.luben:zstd-jni:1.5.6-9")
     implementation("com.typesafe:config:1.4.3")
+    implementation("com.fasterxml.jackson.module:jackson-module-afterburner:2.18.3")
     runtimeOnly("com.datastax.oss:java-driver-core:4.13.0")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }

@@ -1,7 +1,7 @@
 package main.service.generator
 
-import main.data.OrderInfo
 import main.data.Payment
+import main.data.SimpleOrderInfo
 import main.data.UserProfile
 import main.service.generator.utils.DataClassGenerator
 import org.springframework.stereotype.Service
@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service
 interface DataGenerationService {
     fun generateUserProfiles(count: Int): List<UserProfile>
     fun generatePayments(count: Int): List<Payment>
-    fun generateOrders(count: Int): List<OrderInfo>
+    fun generateOrders(count: Int): List<SimpleOrderInfo>
 }
 
 @Service
@@ -23,8 +23,7 @@ class DataGenerationServiceImpl(
     override fun generatePayments(count: Int): List<Payment> =
         List(count) { dataGenerator.generatePayment() }
 
-    override fun generateOrders(count: Int): List<OrderInfo> {
-        println("Генерируется $count заказов")
+    override fun generateOrders(count: Int): List<SimpleOrderInfo> {
         return List(count) { dataGenerator.generateOrderInfo() }
     }
 }

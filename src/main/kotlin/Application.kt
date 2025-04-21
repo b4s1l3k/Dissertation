@@ -39,7 +39,7 @@ class Application(
                 BenchmarkType.pageSize ->
                     pageSizeBenchmark.runBenchmark(
                         ordersCount = props.count,
-                        perCall     = generatingProps.perCall,
+                        perCall = generatingProps.perCall,
                         randomCount = props.randomCount
                     )
 

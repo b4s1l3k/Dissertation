@@ -1,6 +1,10 @@
 package main.benchmark
 
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import main.data.SimpleOrderInfo
 import main.service.cassandra.CassandraService
 import main.service.generator.DataGenerationService
 import org.springframework.beans.factory.annotation.Qualifier
@@ -11,20 +15,25 @@ import kotlin.system.exitProcess
 import kotlin.system.measureTimeMillis
 
 private const val THREADS = 10
-private val PageSizes = listOf(500, 1000, 5000, 10000)
+private val PageSizes = listOf(500, 1000, 5000, 10_000)
 
 @Service
 class CassandraFindAllBenchmark(
     private val generator: DataGenerationService,
-    @Qualifier("compressedCassandraService")
-    private val compressed: CassandraService,
+
     @Qualifier("simpleCassandraService")
-    private val simple: CassandraService,
+    private val simple: CassandraService<SimpleOrderInfo>,
+
+    @Qualifier("compressedCassandraService")
+    private val compressed: CassandraService<SimpleOrderInfo>,
+
+    @Qualifier("onlyCassandraCompressedService")
+    private val onlyCompressed: CassandraService<SimpleOrderInfo>,
+
+    @Qualifier("preCompressedCassandraService")
+    private val preCompressed: CassandraService<SimpleOrderInfo>,
 ) {
 
-    /**
-     * Прогоняет оба сервиса и в конце выводит общую сводку.
-     */
     fun runBenchmark(
         ordersCount: Int,
         perCall: Int,
@@ -32,30 +41,21 @@ class CassandraFindAllBenchmark(
     ): Nothing = runBlocking {
         val summary = linkedMapOf<String, List<Pair<Int, Long>>>()
 
-        summary["Compressed"] = benchmark(
-            "CompressedCassandraService",
-            compressed,
-            ordersCount, perCall, randomCount
-        )
+        summary["Simple"] = benchmark("Simple", simple, ordersCount, perCall, randomCount)
+        summary["Compressed"] = benchmark("Compressed", compressed, ordersCount, perCall, randomCount)
+        summary["OnlyCompressed"] = benchmark("OnlyCompressed", onlyCompressed, ordersCount, perCall, randomCount)
+        summary["PreCompressed"] = benchmark("PreCompressed", preCompressed, ordersCount, perCall, randomCount)
 
-        summary["Simple"] = benchmark(
-            "SimpleCassandraService",
-            simple,
-            ordersCount, perCall, randomCount
-        )
-
-        // ────────── итоговая таблица ──────────
         println("\n=== Сводные результаты ===")
-        // Заголовок
-        print("pageSize".padEnd(10))
-        summary.keys.forEach { label -> print("| ${label.padEnd(10)}") }
-        println("\n" + "-".repeat(11 + summary.size * 13))
+        print("pageSize".padEnd(12))
+        summary.keys.forEach { label -> print("| ${label.padEnd(15)}") }
+        println("\n" + "-".repeat(13 + summary.size * 18))
 
         PageSizes.forEach { size ->
-            print(size.toString().padEnd(10))
+            print(size.toString().padEnd(12))
             summary.values.forEach { list ->
                 val ms = list.first { it.first == size }.second
-                print("| ${"%.3f".format(ms / 1_000.0).padEnd(10)}")
+                print("| ${"%.3f".format(ms / 1_000.0).padEnd(15)}")
             }
             println()
         }
@@ -66,7 +66,7 @@ class CassandraFindAllBenchmark(
 
     private suspend fun benchmark(
         label: String,
-        cassandra: CassandraService,
+        cassandra: CassandraService<SimpleOrderInfo>,
         ordersCount: Int,
         perCall: Int,
         randomCount: Boolean
@@ -91,7 +91,7 @@ class CassandraFindAllBenchmark(
         for (size in PageSizes) {
             val ms = measureTimeMillis { cassandra.findAll(size) }
             results += size to ms
-            println("pageSize=$size → ${"%.3f".format(ms / 1_000.0)} сек")
+            println("$label pageSize=$size → ${"%.3f".format(ms / 1_000.0)} сек")
         }
         return results
     }

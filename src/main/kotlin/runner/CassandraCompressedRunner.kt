@@ -3,6 +3,7 @@ package main.runner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import main.data.SimpleOrderInfo
 import main.service.cassandra.CassandraService
 import main.service.generator.DataGenerationService
 import org.springframework.beans.factory.annotation.Qualifier
@@ -16,43 +17,34 @@ private const val Threads = 10
 @Service
 class CassandraCompressedRunner(
     private val generator: DataGenerationService,
-    @Qualifier("simpleCassandraService")
-    private val cassandra: CassandraService
+    @Qualifier("compressedCassandraService")
+    private val cassandra: CassandraService<SimpleOrderInfo>
 ) {
     fun cassandraCompressedRun(ordersCount: Int, perCall: Int, randomCount: Boolean): Nothing = runBlocking {
         cassandra.deleteAll()
         println("Таблица очищена")
 
         val startTime = System.currentTimeMillis()
+        val remaining = AtomicInteger(ordersCount)
 
-        val orders = AtomicInteger(ordersCount)
-
-        val pipelines = List(Threads) {
+        val jobs = List(Threads) {
             launch(Dispatchers.Default) {
                 while (true) {
-                    val orderInfoNumber = if (randomCount) Random.nextInt(10, 300) else perCall
-
-                    if (orders.getAndAdd(-orderInfoNumber) <= 0) break
-
-                    cassandra.save(
-                        generator.generateOrders(orderInfoNumber)
-                    )
+                    val batch = if (randomCount) Random.nextInt(10, 300) else perCall
+                    if (remaining.getAndAdd(-batch) <= 0) break
+                    cassandra.save(generator.generateOrders(batch))
                 }
             }
         }
+        jobs.forEach { it.join() }
 
-        pipelines.forEach { it.join() }
+        cassandra.findAll(5_000)
 
-        cassandra.findAll(5000)
-
-        val totalSeconds = (System.currentTimeMillis() - startTime) / 1000
-
-        if (totalSeconds < 60) {
-            println("Обработка заказов завершена!\nВремени потрачено: $totalSeconds с")
+        val elapsed = (System.currentTimeMillis() - startTime) / 1000
+        if (elapsed < 60) {
+            println("Обработка заказов завершена! Времени потрачено: $elapsed с")
         } else {
-            val minutes = totalSeconds / 60
-            val seconds = totalSeconds % 60
-            println("Обработка заказов завершена!\nВремени потрачено $minutes м $seconds с")
+            println("Обработка заказов завершена! Времени потрачено: ${elapsed / 60} м ${elapsed % 60} с")
         }
 
         exitProcess(0)

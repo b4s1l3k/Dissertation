@@ -17,7 +17,6 @@ class SnappyCompressionProtocol(@Value("\${compression.snappy.blockSize}") priva
     CompressionService {
     override fun compressData(data: ByteArray): ByteArray {
         val output = ByteArrayOutputStream()
-        println("Данные весом ${data.size} сжимаются")
         ByteArrayInputStream(data).use { input ->
             SnappyOutputStream(output).use { snappyOut ->
                 input.copyTo(snappyOut, blockSize)
@@ -28,7 +27,6 @@ class SnappyCompressionProtocol(@Value("\${compression.snappy.blockSize}") priva
 
     override fun decompressData(data: ByteArray): ByteArray {
         val output = ByteArrayOutputStream()
-        println("Данные весом ${data.size} разжимаются")
         SnappyInputStream(ByteArrayInputStream(data)).use { snappyIn ->
             snappyIn.copyTo(output, blockSize)
         }

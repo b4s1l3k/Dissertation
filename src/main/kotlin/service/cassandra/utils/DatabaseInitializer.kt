@@ -13,7 +13,7 @@ class DatabaseInitializer(
 
         cql.execute(
             """
-            CREATE TABLE IF NOT EXISTS dissertation.simple_order_info (
+            CREATE TABLE IF NOT EXISTS dissertation.cassandra_order_info (
                 id text PRIMARY KEY,
                 user text,
                 payment text,
@@ -36,7 +36,7 @@ class DatabaseInitializer(
                 'chunk_length_in_kb': '256',
                 'compression_level' : '22'
             }
-            AND crc_check_chance = 1.0
+            AND crc_check_chance = 0.1
             """.trimIndent()
         )
 
@@ -51,7 +51,7 @@ class DatabaseInitializer(
                 'chunk_length_in_kb': '256',
                 'compression_level' : '22'
             }
-            AND crc_check_chance = 1.0
+            AND crc_check_chance = 0.1
             """.trimIndent()
         )
 
@@ -76,18 +76,18 @@ class DatabaseInitializer(
                 metadata map<text, text>
             )
             WITH compression = {'enabled':'false'} 
-            AND crc_check_chance = 1.0
+            AND crc_check_chance = 0.1
             """.trimIndent()
         )
 
         cql.execute(
             """
-            CREATE TABLE IF NOT EXISTS dissertation.compressed_order_info (
+            CREATE TABLE IF NOT EXISTS dissertation.precompressed_order_info (
                 id text PRIMARY KEY,
                 compressed_payload blob
             )
             WITH compression = {'enabled':'false'}
-            AND crc_check_chance = 1.0
+            AND crc_check_chance = 0.1
             """.trimIndent()
         )
     }

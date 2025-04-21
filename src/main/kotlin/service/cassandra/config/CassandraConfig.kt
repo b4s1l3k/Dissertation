@@ -1,5 +1,7 @@
 package main.service.cassandra.config
 
+import BlobToByteArrayConverter
+import ByteArrayToBlobConverter
 import main.config.CassandraProperties
 import main.data.*
 import main.utils.SerializationService

@@ -1,10 +1,8 @@
 package main.service.cassandra
 
-import main.data.OrderInfo
-
-interface CassandraService {
-    suspend fun save(entities: List<OrderInfo>)
-    suspend fun findById(id: String): OrderInfo?
+interface CassandraService<T> {
+    suspend fun save(entities: List<T>)
+    suspend fun findById(id: String): T?
     suspend fun findAll(pageSize: Int = 1000)
     suspend fun deleteAll()
 }
