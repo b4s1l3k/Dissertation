@@ -31,13 +31,12 @@ class DataClassGeneratorImpl : DataClassGenerator {
             product = generateProducts(),
             quantity = Random.nextInt(1, 10),
             totalPrice = Money(
-                moneyAmount = MoneyAmount(
-                    BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(
-                        3,
-                        RoundingMode.HALF_UP
-                    )
+                moneyAmount =
+                BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(
+                    3,
+                    RoundingMode.HALF_UP
                 ),
-                currency = MoneyCurrency(Currency.entries.toTypedArray().random())
+                currency = Currency.entries.toTypedArray().random().toString()
             ),
             status = OrderStatus.entries.toTypedArray().random(),
             deliveryMethod = DeliveryMethod.entries.toTypedArray().randomOrNull(),
@@ -61,11 +60,11 @@ class DataClassGeneratorImpl : DataClassGenerator {
         return UserProfile(
             id = UUID.randomUUID().toString(),
             name = faker.name.name(),
-            email = UserEmail(faker.internet.email()),
+            email = faker.internet.email(),
             phone = nullOrPhone(),
             address = nullOrAddress(),
             birthDate = nullOrTime(),
-            gender = Gender.entries.toTypedArray().randomOrNull(),
+            gender = Gender.entries.toTypedArray().randomOrNull().toString(),
             createdAt = Instant.now().toEpochMilli(),
             lastUpdatedAt = Instant.now().toEpochMilli(),
             preferences = generatePreferences()
@@ -79,38 +78,23 @@ class DataClassGeneratorImpl : DataClassGenerator {
         return Payment(
             id = UUID.randomUUID(),
             amount = Money(
-                moneyAmount = MoneyAmount(
-                    BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(
-                        3,
-                        RoundingMode.HALF_UP
-                    )
-                ),
-                currency = MoneyCurrency(Currency.entries.toTypedArray().random())
+                moneyAmount = BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(3, RoundingMode.HALF_UP),
+                currency = Currency.entries.toTypedArray().random().toString()
             ),
-            status = PaymentStatus.entries.toTypedArray().random(),
-            method = PaymentMethod.entries.toTypedArray().random(),
+            status = PaymentStatus.entries.toTypedArray().random().toString(),
+            method = PaymentMethod.entries.toTypedArray().random().toString(),
             description = nullOrString(),
             recipientName = nullOrName(),
             recipientAccount = nullOrLong(),
             senderName = nullOrName(),
             senderAccount = nullOrLong(),
             transactionFee = Money(
-                moneyAmount = MoneyAmount(
-                    BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(
-                        3,
-                        RoundingMode.HALF_UP
-                    )
-                ),
-                currency = MoneyCurrency(Currency.entries.toTypedArray().random())
+                moneyAmount = BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(3, RoundingMode.HALF_UP),
+                currency = Currency.entries.toTypedArray().random().toString()
             ),
             taxAmount = Money(
-                moneyAmount = MoneyAmount(
-                    BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(
-                        3,
-                        RoundingMode.HALF_UP
-                    )
-                ),
-                currency = MoneyCurrency(Currency.entries.toTypedArray().random())
+                moneyAmount = BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(3, RoundingMode.HALF_UP),
+                currency = Currency.entries.toTypedArray().random().toString()
             ),
             metadata = mapOf(
                 "order_id" to UUID.randomUUID().toString(),
@@ -133,13 +117,8 @@ class DataClassGeneratorImpl : DataClassGenerator {
                 name = faker.commerce.productName(),
                 description = faker.fallout.quotes(),
                 price = Money(
-                    moneyAmount = MoneyAmount(
-                        BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(
-                            3,
-                            RoundingMode.HALF_UP
-                        )
-                    ),
-                    currency = MoneyCurrency(Currency.entries.toTypedArray().random())
+                    moneyAmount = BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(3, RoundingMode.HALF_UP),
+                    currency = Currency.entries.toTypedArray().random().toString()
                 ),
                 stock = Random.nextInt(0, 100)
             )
@@ -181,13 +160,8 @@ class DataClassGeneratorImpl : DataClassGenerator {
     private fun nullOrMoney(): Money? {
         return if (Random.nextBoolean()) {
             Money(
-                moneyAmount = MoneyAmount(
-                    BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(
-                        3,
-                        RoundingMode.HALF_UP
-                    )
-                ),
-                currency = MoneyCurrency(Currency.entries.toTypedArray().random())
+                moneyAmount = BigDecimal(Random.nextDouble(10.0, 1000.0)).setScale(3, RoundingMode.HALF_UP),
+                currency = Currency.entries.toTypedArray().random().toString()
             )
         } else {
             null

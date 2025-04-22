@@ -12,6 +12,7 @@ class TableSizeReporter(
     private val cql: CqlTemplate,
     private val cassProps: CassandraProperties
 ) {
+
     fun reportTableSizes(vararg tables: String) {
         val ks = cassProps.keyspace
         println("\n=== Оценка размера таблиц в keyspace '$ks' ===")
@@ -20,7 +21,11 @@ class TableSizeReporter(
             "service:jmx:rmi:///jndi/rmi://${cassProps.jmxHost}:${cassProps.jmxPort}/jmxrmi"
         )
         JMXConnectorFactory.connect(url).use { jmxc ->
-            val mbs = jmxc.mBeanServerConnection
+            val raw = jmxc.mBeanServerConnection
+            val mbs = Jmx.wrap(raw)
+
+//            val mbs = jmxc.mBeanServerConnection
+
             flushKeyspace(mbs, ks)
 
             tables.forEach { tbl ->
@@ -29,14 +34,7 @@ class TableSizeReporter(
                     ?: getFromSstablesView(tbl)
                     ?: estimateFromSizeEstimates(tbl)
 
-                val source = when {
-                    bytes == getFromMetricsJmx(mbs, ks, tbl) -> "JMX LiveDisk/TotalDisk (metrics)"
-                    bytes == getFromLegacyJmx(mbs, ks, tbl) -> "JMX ColumnFamilies.LiveDiskSpaceUsed"
-                    bytes == getFromSstablesView(tbl) -> "CQL system_views.sstables"
-                    else -> "CQL system.size_estimates"
-                }
-
-                println("${tbl.padEnd(25)} : $bytes байт (~${bytes / 1024} KiB)    [$source]")
+                println("${tbl.padEnd(25)} : $bytes байт (~${bytes / 1024} KiB)")
             }
         }
     }
@@ -54,9 +52,9 @@ class TableSizeReporter(
         keyspace: String,
         table: String
     ): Long? {
-        val base = "org.apache.cassandra.metrics:type=Table," +
-                "keyspace=$keyspace,scope=$table,name="
-        return listOf("LiveDiskSpaceUsed", "TotalDiskSpaceUsed").asSequence()
+        val base = "org.apache.cassandra.metrics:type=Table,keyspace=$keyspace,scope=$table,name="
+        return listOf("TotalDiskSpaceUsed", "LiveDiskSpaceUsed")
+            .asSequence()
             .mapNotNull { metric ->
                 runCatching {
                     val mbean = ObjectName(base + metric)
@@ -71,10 +69,7 @@ class TableSizeReporter(
         keyspace: String,
         table: String
     ): Long? = runCatching {
-        val name = ObjectName(
-            "org.apache.cassandra.db:type=ColumnFamilies," +
-                    "keyspace=$keyspace,columnfamily=$table"
-        )
+        val name = ObjectName("org.apache.cassandra.db:type=ColumnFamilies,keyspace=$keyspace,columnfamily=$table")
         (mbs.getAttribute(name, "LiveDiskSpaceUsed") as Number).toLong().takeIf { it > 0 }
     }.getOrNull()
 

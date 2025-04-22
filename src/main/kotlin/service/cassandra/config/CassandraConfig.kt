@@ -3,8 +3,6 @@ package main.service.cassandra.config
 import BlobToByteArrayConverter
 import ByteArrayToBlobConverter
 import main.config.CassandraProperties
-import main.data.*
-import main.utils.SerializationService
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.data.cassandra.config.AbstractCassandraConfiguration
@@ -15,8 +13,7 @@ import org.springframework.data.cassandra.repository.config.EnableCassandraRepos
 @Configuration
 @EnableCassandraRepositories(basePackages = ["main"])
 class CassandraConfig(
-    private val props: CassandraProperties,
-    private val json: SerializationService
+    private val props: CassandraProperties
 ) : AbstractCassandraConfiguration() {
 
     override fun getKeyspaceName() = props.keyspace
@@ -30,14 +27,6 @@ class CassandraConfig(
     override fun customConversions(): CassandraCustomConversions =
         CassandraCustomConversions(
             listOf(
-                UserProfileToStringConverter(json),
-                StringToUserProfileConverter(json),
-                PaymentToStringConverter(json),
-                StringToPaymentConverter(json),
-                ProductListToStringConverter(json),
-                StringToProductListConverter(json),
-                MoneyToStringConverter(json),
-                StringToMoneyConverter(json),
                 ByteArrayToBlobConverter(),
                 BlobToByteArrayConverter()
             )

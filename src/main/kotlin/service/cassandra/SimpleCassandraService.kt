@@ -10,28 +10,28 @@ import org.springframework.stereotype.Service
 
 @Service("simpleCassandraService")
 class SimpleCassandraService(
-    private val repo: CassandraRepository<SimpleOrderInfo, String>
+    private val repository: CassandraRepository<SimpleOrderInfo, String>
 ) : CassandraService<SimpleOrderInfo> {
 
     override suspend fun save(entities: List<SimpleOrderInfo>): Unit = withContext(Dispatchers.IO) {
-        repo.saveAll(entities)
+        repository.saveAll(entities)
     }
 
     override suspend fun findById(id: String): SimpleOrderInfo? = withContext(Dispatchers.IO) {
-        repo.findById(id).orElse(null)
+        repository.findById(id).orElse(null)
     }
 
     override suspend fun findAll(pageSize: Int): Unit = coroutineScope {
-        var page = repo.findAll(PageRequest.of(0, pageSize))
+        var page = repository.findAll(PageRequest.of(0, pageSize))
 
         do {
-            page.content.forEach { /* no‑op: доступ к данным для честного замера */ }
+            page.content.forEach { }
             if (!page.hasNext()) break
-            page = repo.findAll(page.nextPageable())
+            page = repository.findAll(page.nextPageable())
         } while (true)
     }
 
     override suspend fun deleteAll(): Unit = withContext(Dispatchers.IO) {
-        repo.deleteAll()
+        repository.deleteAll()
     }
 }

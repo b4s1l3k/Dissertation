@@ -18,14 +18,14 @@ compression:
   lz4:
     blockSize: 65536
   snappy:
-    blockSize: 65536
+    blockSize: 128
   zstd:
     compressionLevel: 1
     enableChecksum: false
 
 application:
   type: benchmark # nonCompressed, onlyPreCompressed, preCompressed, cassandraCompressed, benchmark
-  count: 600000
-  benchmarkType: pageSize # pageSize, parallelism
+  count: 60000
+  benchmarkType: fallback # pageSize, read, fallback
   randomCount: false
   perTime: false # TBD

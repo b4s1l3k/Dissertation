@@ -45,5 +45,7 @@ enum class ApplicationTypes {
 
 enum class BenchmarkType {
     pageSize,
-    parallelism
+    parallelism,
+    read,
+    fallback
 }

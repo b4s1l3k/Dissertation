@@ -13,7 +13,7 @@ interface CompressionService {
 }
 
 @Component
-class SnappyCompressionProtocol(@Value("\${compression.snappy.blockSize}") private val blockSize: Int) :
+class SnappyCompressionProtocol(@Value("\${compression.snappy.blockSize}") var blockSize: Int) :
     CompressionService {
     override fun compressData(data: ByteArray): ByteArray {
         val output = ByteArrayOutputStream()

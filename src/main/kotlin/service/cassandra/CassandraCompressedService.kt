@@ -9,8 +9,8 @@ import org.springframework.data.cassandra.repository.CassandraRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 
-@Service("onlyCassandraCompressedService")
-class OnlyCassandraCompressedService(
+@Service("cassandraCompressedService")
+class CassandraCompressedService(
     private val repo: CassandraRepository<CassandraOrderInfo, String>
 ) : CassandraService<SimpleOrderInfo> {
 

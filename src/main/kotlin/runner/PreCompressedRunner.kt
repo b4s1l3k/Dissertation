@@ -17,7 +17,7 @@ private const val THREADS = 10
 @Service
 class PreCompressedRunner(
     private val generator: DataGenerationService,
-    @Qualifier("preCompressedCassandraService")
+    @Qualifier("appAndCassandraCompressedService")
     private val cassandra: CassandraService<SimpleOrderInfo>
 ) {
     fun preCompresedRun(ordersCount: Int, perCall: Int, randomCount: Boolean): Nothing = runBlocking {

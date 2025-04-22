@@ -13,79 +13,137 @@ class DatabaseInitializer(
 
         cql.execute(
             """
-            CREATE TABLE IF NOT EXISTS dissertation.cassandra_order_info (
-                id text PRIMARY KEY,
-                user text,
-                payment text,
-                product text,
-                quantity int,
-                totalPrice text,
-                orderDate bigint,
-                status text,
-                deliveryMethod text,
-                deliveryAddress text,
-                estimatedDeliveryDate bigint,
-                trackingNumber text,
-                paymentId text,
-                discountAmount text,
-                taxAmount text,
-                metadata map<text, text>
-            )
-            WITH compression = {
-                'class'             : 'org.apache.cassandra.io.compress.DeflateCompressor',
-                'chunk_length_in_kb': '64'
-            }
-            AND crc_check_chance = 0.1
+            CREATE TYPE IF NOT EXISTS dissertation.money_type (
+              money_amount decimal,
+              currency     text
+            );
             """.trimIndent()
         )
-
         cql.execute(
             """
-            CREATE TABLE IF NOT EXISTS dissertation.compressed_order_info (
-                id text PRIMARY KEY,
-                compressed_payload blob
-            )
-            WITH compression = {
-                'class'             : 'org.apache.cassandra.io.compress.DeflateCompressor',
-                'chunk_length_in_kb': '64'
-            }
-            AND crc_check_chance = 0.1
+            CREATE TYPE IF NOT EXISTS dissertation.product_type (
+              id          uuid,
+              name        text,
+              description text,
+              price       frozen<money_type>,
+              stock       int
+            );
+            """.trimIndent()
+        )
+        cql.execute(
+            """
+            CREATE TYPE IF NOT EXISTS dissertation.user_profile_type (
+              id              text,
+              name            text,
+              email           text,
+              phone           text,
+              address         text,
+              birth_date      bigint,
+              gender          text,
+              created_at      bigint,
+              last_updated_at bigint,
+              preferences     map<text,text>
+            );
+            """.trimIndent()
+        )
+        cql.execute(
+            """
+            CREATE TYPE IF NOT EXISTS dissertation.payment_type (
+              id                uuid,
+              amount            frozen<money_type>,
+              status            text,
+              method            text,
+              description       text,
+              recipient_name    text,
+              recipient_account bigint,
+              sender_name       text,
+              sender_account    bigint,
+              transaction_fee   frozen<money_type>,
+              tax_amount        frozen<money_type>,
+              metadata          map<text,text>,
+              invoice_number    bigint,
+              confirmation_code text,
+              scheduled_date    bigint,
+              expiration_date   bigint
+            );
             """.trimIndent()
         )
 
         cql.execute(
             """
             CREATE TABLE IF NOT EXISTS dissertation.simple_order_info (
-                id text PRIMARY KEY,
-                user text,
-                payment text,
-                product text,
-                quantity int,
-                totalPrice text,
-                orderDate bigint,
-                status text,
-                deliveryMethod text,
-                deliveryAddress text,
-                estimatedDeliveryDate bigint,
-                trackingNumber text,
-                paymentId text,
-                discountAmount text,
-                taxAmount text,
-                metadata map<text, text>
+              id                      text PRIMARY KEY,
+              user                    frozen<user_profile_type>,
+              payment                 frozen<payment_type>,
+              product                 list<frozen<product_type>>,
+              quantity                int,
+              total_price             frozen<money_type>,
+              order_date              bigint,
+              status                  text,
+              delivery_method         text,
+              delivery_address        text,
+              estimated_delivery_date bigint,
+              tracking_number         text,
+              payment_id              uuid,
+              discount_amount         frozen<money_type>,
+              tax_amount              frozen<money_type>,
+              metadata                map<text,text>
             )
-            WITH compression = {'enabled':'false'} 
-            AND crc_check_chance = 0.1
+            WITH compression = {'enabled':'false'}
+            AND crc_check_chance = 0.1;
+            """.trimIndent()
+        )
+
+        cql.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dissertation.cassandra_order_info (
+              id                      text PRIMARY KEY,
+              user                    frozen<user_profile_type>,
+              payment                 frozen<payment_type>,
+              product                 list<frozen<product_type>>,
+              quantity                int,
+              total_price             frozen<money_type>,
+              order_date              bigint,
+              status                  text,
+              delivery_method         text,
+              delivery_address        text,
+              estimated_delivery_date bigint,
+              tracking_number         text,
+              payment_id              uuid,
+              discount_amount         frozen<money_type>,
+              tax_amount              frozen<money_type>,
+              metadata                map<text,text>
+            )
+            WITH compression = {
+              'class':'org.apache.cassandra.io.compress.DeflateCompressor',
+              'chunk_length_in_kb':'32'
+            }
+            AND crc_check_chance = 0.1;
             """.trimIndent()
         )
 
         cql.execute(
             """
             CREATE TABLE IF NOT EXISTS dissertation.precompressed_order_info (
-                id text PRIMARY KEY,
-                compressed_payload blob
+              id text PRIMARY KEY,
+              compressed_payload blob
             )
             WITH compression = {'enabled':'false'}
-            AND crc_check_chance = 0.1
+            AND crc_check_chance = 0.1;
+            """.trimIndent()
+        )
+
+        cql.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dissertation.app_compressed_order_info (
+              id text PRIMARY KEY,
+              compressed_payload blob
+            )
+            WITH compression = {
+              'class':'org.apache.cassandra.io.compress.DeflateCompressor',
+              'chunk_length_in_kb':'128'
+            }
+            AND crc_check_chance = 0.1;
             """.trimIndent()
         )
     }

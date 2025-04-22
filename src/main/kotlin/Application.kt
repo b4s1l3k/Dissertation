@@ -1,6 +1,8 @@
 package main
 
 import main.benchmark.CassandraFindAllBenchmark
+import main.benchmark.FallbackBenchmark
+import main.benchmark.ReadBenchmark
 import main.config.ApplicationProperties
 import main.config.ApplicationTypes
 import main.config.BenchmarkType
@@ -16,6 +18,8 @@ class Application(
     private val preCompressedRunner: PreCompressedRunner,
     private val cassandraCompressedRunner: CassandraCompressedRunner,
     private val pageSizeBenchmark: CassandraFindAllBenchmark,
+    private val readBenchmark: ReadBenchmark,
+    private val fallbackBenchmark: FallbackBenchmark,
     private val generatingProps: GeneratingProperties
 ) : CommandLineRunner {
 
@@ -41,6 +45,16 @@ class Application(
                         ordersCount = props.count,
                         perCall = generatingProps.perCall,
                         randomCount = props.randomCount
+                    )
+
+                BenchmarkType.read ->
+                    readBenchmark.runBenchmark(
+                        ordersCount = props.count
+                    )
+
+                BenchmarkType.fallback ->
+                    fallbackBenchmark.runFallbackBenchmark(
+                        ordersCount = props.count
                     )
 
                 BenchmarkType.parallelism ->

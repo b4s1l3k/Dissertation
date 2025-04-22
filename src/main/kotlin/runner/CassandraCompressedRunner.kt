@@ -17,7 +17,7 @@ private const val Threads = 10
 @Service
 class CassandraCompressedRunner(
     private val generator: DataGenerationService,
-    @Qualifier("compressedCassandraService")
+    @Qualifier("appCompressedService")
     private val cassandra: CassandraService<SimpleOrderInfo>
 ) {
     fun cassandraCompressedRun(ordersCount: Int, perCall: Int, randomCount: Boolean): Nothing = runBlocking {

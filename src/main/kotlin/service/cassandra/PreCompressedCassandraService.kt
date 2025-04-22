@@ -10,21 +10,21 @@ import org.springframework.data.cassandra.repository.CassandraRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 
-@Service("preCompressedCassandraService")
-class PreCompressedCassandraService(
+@Service("appAndCassandraCompressedService")
+class AppAndCassandraCompressedService(
     private val repository: CassandraRepository<PreCompressedOrderInfo, String>,
     private val compression: CompressionService,
-    private val json: SerializationService
+    private val serializer: SerializationService
 ) : CassandraService<SimpleOrderInfo> {
-
     override suspend fun save(entities: List<SimpleOrderInfo>): Unit = withContext(Dispatchers.IO) {
         val sem = Semaphore(4)
-        val compressedEntities = coroutineScope {
+        val blobs = coroutineScope {
             entities.map { order ->
                 async(Dispatchers.Default) {
                     sem.acquire()
                     try {
-                        val bytes = json.serializeToBytes(order)
+                        // Avro-сериализация
+                        val bytes = serializer.serializeToBytes(order)
                         PreCompressedOrderInfo(order.id, compression.compressData(bytes))
                     } finally {
                         sem.release()
@@ -32,29 +32,29 @@ class PreCompressedCassandraService(
                 }
             }.awaitAll()
         }
-        repository.saveAll(compressedEntities)
+        repository.saveAll(blobs)
     }
 
     override suspend fun findById(id: String): SimpleOrderInfo? = withContext(Dispatchers.IO) {
-        repository.findById(id).orElse(null)?.let { decompress(it) }
+        repository.findById(id)
+            .orElse(null)
+            ?.let { entry ->
+                val decrypted = compression.decompressData(entry.compressedPayload)
+                serializer.deserializeFromBytes(decrypted, SimpleOrderInfo::class.java)
+            }
     }
 
-    override suspend fun findAll(pageSize: Int): Unit = withContext(Dispatchers.Default) {
+    override suspend fun findAll(pageSize: Int) = withContext(Dispatchers.Default) {
         var page = withContext(Dispatchers.IO) { repository.findAll(PageRequest.of(0, pageSize)) }
         do {
-            page.content.forEach { decompress(it) }
-            if (!page.hasNext()) break
-            page = withContext(Dispatchers.IO) { repository.findAll(page.nextPageable()) }
+            page.content.forEach { entry ->
+                val decrypted = compression.decompressData(entry.compressedPayload)
+                serializer.deserializeFromBytes(decrypted, SimpleOrderInfo::class.java)
+            }
+            page =
+                if (page.hasNext()) withContext(Dispatchers.IO) { repository.findAll(page.nextPageable()) } else break
         } while (true)
     }
 
-    override suspend fun deleteAll(): Unit = withContext(Dispatchers.IO) {
-        repository.deleteAll()
-    }
-
-    private suspend fun decompress(entity: PreCompressedOrderInfo): SimpleOrderInfo =
-        withContext(Dispatchers.Default) {
-            val bytes = compression.decompressData(entity.compressedPayload)
-            json.deserializeFromBytes(bytes, SimpleOrderInfo::class.java)
-        }
+    override suspend fun deleteAll() = withContext(Dispatchers.IO) { repository.deleteAll() }
 }

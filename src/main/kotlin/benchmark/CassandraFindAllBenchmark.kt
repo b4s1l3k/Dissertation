@@ -16,7 +16,7 @@ import kotlin.system.exitProcess
 import kotlin.system.measureTimeMillis
 
 private const val THREADS = 10
-private val PageSizes = listOf(100, 500, 1000, 2000, 5000)
+private val PageSizes = listOf(100)
 
 @Service
 class CassandraFindAllBenchmark(
@@ -25,14 +25,14 @@ class CassandraFindAllBenchmark(
     @Qualifier("simpleCassandraService")
     private val simple: CassandraService<SimpleOrderInfo>,
 
-    @Qualifier("compressedCassandraService")
-    private val compressed: CassandraService<SimpleOrderInfo>,
+    @Qualifier("appCompressedService")
+    private val appCompressed: CassandraService<SimpleOrderInfo>,
 
-    @Qualifier("onlyCassandraCompressedService")
-    private val onlyCompressed: CassandraService<SimpleOrderInfo>,
+    @Qualifier("cassandraCompressedService")
+    private val cassandraCompressed: CassandraService<SimpleOrderInfo>,
 
-    @Qualifier("preCompressedCassandraService")
-    private val preCompressed: CassandraService<SimpleOrderInfo>,
+    @Qualifier("appAndCassandraCompressedService")
+    private val appAndCassandraCompressed: CassandraService<SimpleOrderInfo>,
 
     private val tableSizeReporter: TableSizeReporter
 ) {
@@ -45,10 +45,11 @@ class CassandraFindAllBenchmark(
         val summary = linkedMapOf<String, List<Pair<Int, Long>>>()
 
         summary["Simple"] = benchmark("Simple", simple, ordersCount, perCall, randomCount)
-        summary["Compressed"] = benchmark("Compressed", compressed, ordersCount, perCall, randomCount)
-        summary["OnlyCompressed"] =
-            benchmark("OnlyCassandraCompressed", onlyCompressed, ordersCount, perCall, randomCount)
-        summary["PreCompressed"] = benchmark("PreCompressed", preCompressed, ordersCount, perCall, randomCount)
+        summary["AppCompressed"] = benchmark("AppCompressed", appCompressed, ordersCount, perCall, randomCount)
+        summary["OnlyCassandraCompressed"] =
+            benchmark("OnlyCassandraCompressed", cassandraCompressed, ordersCount, perCall, randomCount)
+        summary["PreCompressed"] =
+            benchmark("PreCompressed", appAndCassandraCompressed, ordersCount, perCall, randomCount)
 
         println("\n=== Сводные результаты ===")
         print("pageSize".padEnd(12))
@@ -67,7 +68,7 @@ class CassandraFindAllBenchmark(
         tableSizeReporter.reportTableSizes(
             "simple_order_info",
             "cassandra_order_info",
-            "compressed_order_info",
+            "app_compressed_order_info",
             "precompressed_order_info"
         )
 
