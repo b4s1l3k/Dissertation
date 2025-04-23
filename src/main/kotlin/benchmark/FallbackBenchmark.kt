@@ -17,6 +17,19 @@ import kotlin.random.Random
 import kotlin.system.exitProcess
 import kotlin.system.measureTimeMillis
 
+private const val DoubleCompressedStrategy = "DoubleCompressed"
+private const val AppCompressedStrategy = "AppCompressed"
+private const val CassCompressedStrategy = "CassCompressed"
+private const val SimpleStrategy = "Simple"
+
+private val snappyStrategies = setOf(AppCompressedStrategy, DoubleCompressedStrategy)
+private val deflateStrategies = setOf(CassCompressedStrategy, DoubleCompressedStrategy)
+
+private const val SimpleTable = "simple_order_info"
+private const val CassandraCompressedTable = "cassandra_order_info"
+private const val AppCompressedTable = "app_compressed_order_info"
+private const val PrecompressedTable = "precompressed_order_info"
+
 @Service
 class FallbackBenchmark(
     private val generator: DataGenerationService,
@@ -41,19 +54,15 @@ class FallbackBenchmark(
         val msPerOp: Double,
         val tps: Double,
         val cpu: Double,
-        val memMiB: Double,
-        val error: Boolean
+        val memMiB: Double
     )
 
     private val services = mapOf(
-        "Simple" to simpleService,
-        "CassCompressed" to cassandraCompressedService,
-        "AppCompressed" to appCompressedService,
-        "DoubleCompressed" to doubleCompressedService
+        SimpleStrategy to simpleService,
+        CassCompressedStrategy to cassandraCompressedService,
+        AppCompressedStrategy to appCompressedService,
+        DoubleCompressedStrategy to doubleCompressedService
     )
-
-    private val snappyStrategies = setOf("AppCompressed", "DoubleCompressed")
-    private val deflateStrategies = setOf("CassCompressed", "DoubleCompressed")
 
     private val workbook = XSSFWorkbook()
     private val sheet = workbook.createSheet("Results")
@@ -64,8 +73,7 @@ class FallbackBenchmark(
             listOf(
                 "strategy", "blockB", "chunkKiB", "batch", "readRatio",
                 "ms/op_P95", "tps_P95", "cpu_P95", "mem_P95_MiB",
-                "simple_KiB", "cassandra_KiB", "precomp_KiB", "appcomp_KiB",
-                "errors", "errorRate"
+                "simple_KiB", "cassandra_KiB", "precomp_KiB", "appcomp_KiB"
             ).forEachIndexed { i, h -> createCell(i).setCellValue(h) }
         }
     }
@@ -85,7 +93,7 @@ class FallbackBenchmark(
         seed: Long = 42L
     ): Unit = runBlocking {
 
-        println("=== Generating $ordersCount random orders ===")
+        println("\n=== Generating $ordersCount random orders ===")
         val orders = generator.generateOrders(ordersCount)
             .mapIndexed { i, o -> o.copy(id = "${o.id}_$i") }
 
@@ -94,39 +102,36 @@ class FallbackBenchmark(
             println("\n>>> Snappy.blockSize = $block B")
 
             chunkSizes.forEachIndexed { ckIdx, chunkKb ->
-                println(" → Deflate chunk_length_in_kb = $chunkKb KiB")
-
+                println("\n → Deflate chunk_length_in_kb = $chunkKb KiB")
                 alterDeflate(chunkKb)
 
-                preload(orders, parallelBursts, services)
-
-                val sizesKiB = sizeReporter.fetchTableSizes(
-                    "simple_order_info",
-                    "cassandra_order_info",
-                    "precompressed_order_info",
-                    "app_compressed_order_info"
-                ).mapValues { it.value / 1024.0 }
-
-                var sizeRecorded = false
-
-                services.forEach { (strategy, svc) ->
+                val toTest = services.filter { (strategy, _) ->
                     val usesSnappy = strategy in snappyStrategies
                     val usesDeflate = strategy in deflateStrategies
 
-                    if (!usesSnappy && bsIdx > 0) return@forEach
-                    if (!usesDeflate && ckIdx > 0) return@forEach
+                    val blockOk = usesSnappy || strategy in deflateStrategies || bsIdx == 0
+                    val chunkOk = usesDeflate || ckIdx == 0
 
-                    val sizeRowArg: DoubleArray? =
-                        if (!sizeRecorded) {
-                            sizeRecorded = true
-                            doubleArrayOf(
-                                sizesKiB["simple_order_info"] ?: 0.0,
-                                sizesKiB["cassandra_order_info"] ?: 0.0,
-                                sizesKiB["precompressed_order_info"] ?: 0.0,
-                                sizesKiB["app_compressed_order_info"] ?: 0.0
-                            )
-                        } else null
+                    blockOk && chunkOk
+                }
 
+                preload(orders, parallelBursts, toTest)
+
+                val sizesKiB = sizeReporter.fetchTableSizes(
+                    SimpleTable,
+                    CassandraCompressedTable,
+                    PrecompressedTable,
+                    AppCompressedTable
+                ).mapValues { it.value / 1024.0 }
+
+                val sizeRow = doubleArrayOf(
+                    sizesKiB[SimpleTable] ?: 0.0,
+                    sizesKiB[CassandraCompressedTable] ?: 0.0,
+                    sizesKiB[PrecompressedTable] ?: 0.0,
+                    sizesKiB[AppCompressedTable] ?: 0.0
+                )
+
+                toTest.forEach { (strategy, svc) ->
                     readRatios.forEach { rr ->
                         batchSizes.forEach { batch ->
                             runScenario(
@@ -142,9 +147,8 @@ class FallbackBenchmark(
                                 warmUpBursts = warmUpBursts,
                                 warmUpDelayMs = warmUpDelayMs,
                                 interDelayMs = interBurstDelay,
-                                errThr = errThreshold,
                                 seed = seed,
-                                sizeRow = sizeRowArg
+                                sizeRow = sizeRow
                             )
                         }
                     }
@@ -177,15 +181,37 @@ class FallbackBenchmark(
 
     private fun alterDeflate(chunkKb: Int) {
         cql.execute(
-            "ALTER TABLE dissertation.cassandra_order_info " +
+            "ALTER TABLE dissertation.$CassandraCompressedTable " +
                     "WITH compression={'class':'org.apache.cassandra.io.compress.DeflateCompressor'," +
                     "'chunk_length_in_kb':$chunkKb}"
         )
+        verifyChunkLength(CassandraCompressedTable, chunkKb)
+
         cql.execute(
-            "ALTER TABLE dissertation.app_compressed_order_info " +
+            "ALTER TABLE dissertation.$AppCompressedTable " +
                     "WITH compression={'class':'org.apache.cassandra.io.compress.DeflateCompressor'," +
                     "'chunk_length_in_kb':$chunkKb}"
         )
+        verifyChunkLength(AppCompressedTable, chunkKb)
+    }
+
+    private fun verifyChunkLength(tableName: String, expected: Int) {
+        val opts = fetchCompressionOptions(tableName)
+        val actual = opts["chunk_length_in_kb"]?.toIntOrNull()
+            ?: error("У таблицы $tableName нет опции chunk_length_in_kb в compression")
+        if (actual != expected) {
+            error("Неправильный chunk_length_in_kb для $tableName: ожидается $expected, а реально $actual")
+        }
+    }
+
+    private fun fetchCompressionOptions(tableName: String): Map<String, String> {
+        val row = cql.queryForList(
+            "SELECT compression FROM system_schema.tables WHERE keyspace_name=? AND table_name=?",
+            "dissertation", tableName
+        ).firstOrNull() ?: error("Не найдена информация о таблице $tableName в system_schema.tables")
+        @Suppress("UNCHECKED_CAST")
+        return row["compression"] as? Map<String, String>
+            ?: error("Поле compression у таблицы $tableName отсутствует или имеет неожиданный тип")
     }
 
     private suspend fun runScenario(
@@ -201,9 +227,8 @@ class FallbackBenchmark(
         warmUpBursts: Int,
         warmUpDelayMs: Long,
         interDelayMs: Long,
-        errThr: Double,
         seed: Long,
-        sizeRow: DoubleArray?
+        sizeRow: DoubleArray
     ) {
         println("--- $strategy | block=$blockSize B | chunk=$chunkKb KiB | batch=$batchSize | read=$readRatio ---")
 
@@ -229,8 +254,7 @@ class FallbackBenchmark(
                         msPerOp = elapsed.toDouble() / batchSize,
                         tps = if (elapsed > 0) batchSize * 1000.0 / elapsed else Double.NaN,
                         cpu = m.cpuPct,
-                        memMiB = m.totalUsedMiB,
-                        error = false
+                        memMiB = m.totalUsedMiB
                     )
                     sem.release()
                     delay(interDelayMs)
@@ -240,7 +264,7 @@ class FallbackBenchmark(
 
         persistMetrics(
             strategy, blockSize, chunkKb, batchSize, readRatio,
-            stats, bursts, errThr, sizeRow
+            stats, sizeRow
         )
     }
 
@@ -253,7 +277,11 @@ class FallbackBenchmark(
     ) {
         val writes = (batchSize * (1 - readRatio)).toInt().coerceAtLeast(1)
         svc.save(List(writes) { orders.random(rnd) })
-        repeat(batchSize - writes) { svc.findById(orders.random(rnd).id) }
+
+        val readCount = batchSize - writes
+        val readIds = List(readCount) { orders.random(rnd).id }
+
+        svc.findByIds(readIds)
     }
 
     private fun persistMetrics(
@@ -263,8 +291,6 @@ class FallbackBenchmark(
         batch: Int,
         readRatio: Double,
         results: List<BurstResult>,
-        bursts: Int,
-        errThr: Double,
         sizeRow: DoubleArray?
     ) {
         fun List<Double>.p95() = this[(size * 0.95).toInt().coerceAtMost(lastIndex)]
@@ -273,8 +299,6 @@ class FallbackBenchmark(
         val tps = results.map { it.tps }.sorted().p95()
         val cpu = results.map { it.cpu }.sorted().p95()
         val mem = results.map { it.memMiB }.sorted().p95()
-        val errCnt = results.count { it.error }
-        val errRate = errCnt.toDouble() / bursts
 
         sheet.createRow(rowIdx++).apply {
             createCell(0).setCellValue(strategy)
@@ -295,9 +319,6 @@ class FallbackBenchmark(
             } else {
                 (9..12).forEach { idx -> createCell(idx) }
             }
-
-            createCell(13).setCellValue(errCnt.toDouble())
-            createCell(14).setCellValue(errRate)
         }
     }
 }

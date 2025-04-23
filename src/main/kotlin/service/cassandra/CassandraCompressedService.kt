@@ -24,6 +24,13 @@ class CassandraCompressedService(
             repo.findById(id).orElse(null)?.toDto()
         }
 
+    override suspend fun findByIds(ids: List<String>): List<SimpleOrderInfo?> =
+        withContext(Dispatchers.IO) {
+            val mapById: Map<String, CassandraOrderInfo> =
+                repo.findAllById(ids).associateBy { it.id }
+            ids.map { id -> mapById[id]?.toDto() }
+        }
+
     override suspend fun findAll(pageSize: Int) = coroutineScope {
         var page = repo.findAll(PageRequest.of(0, pageSize))
         do {

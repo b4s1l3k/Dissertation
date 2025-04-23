@@ -21,6 +21,11 @@ class SimpleCassandraService(
         repository.findById(id).orElse(null)
     }
 
+    override suspend fun findByIds(ids: List<String>): List<SimpleOrderInfo?> =
+        withContext(Dispatchers.IO) {
+            repository.findAllById(ids).map { it }
+        }
+
     override suspend fun findAll(pageSize: Int): Unit = coroutineScope {
         var page = repository.findAll(PageRequest.of(0, pageSize))
 

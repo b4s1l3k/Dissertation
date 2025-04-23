@@ -13,10 +13,6 @@ class TableSizeReporter(
     private val cassProps: CassandraProperties
 ) {
 
-    /**
-     * Получить размеры таблиц в байтах по JMX или через CQL,
-     * вернёт Map<tableName, sizeBytes>.
-     */
     fun fetchTableSizes(vararg tables: String): Map<String, Long> {
         val ks = cassProps.keyspace
         val url = JMXServiceURL(
@@ -24,11 +20,10 @@ class TableSizeReporter(
         )
         JMXConnectorFactory.connect(url).use { jmxc ->
 //            val raw = jmxc.mBeanServerConnection
-//            val mbs = Jmx.wrap(raw)
+//            val mbs = Jmxс.wrap(raw)
 
             val mbs = jmxc.mBeanServerConnection
 
-            // Сначала форсируем flush, чтобы данные были актуальны на диске
             flushKeyspace(mbs, ks)
 
             return tables.associateWith { tbl ->
@@ -40,9 +35,6 @@ class TableSizeReporter(
         }
     }
 
-    /**
-     * Напечатать размеры таблиц в консоль, как раньше.
-     */
     fun reportTableSizes(vararg tables: String) {
         val ks = cassProps.keyspace
         println("\n=== Оценка размера таблиц в keyspace '$ks' ===")
@@ -52,7 +44,7 @@ class TableSizeReporter(
         )
         JMXConnectorFactory.connect(url).use { jmxc ->
 //            val raw = jmxc.mBeanServerConnection
-//            val mbs = Jmx.wrap(raw)
+//            val mbs = Jmxс.wrap(raw)
 
             val mbs = jmxc.mBeanServerConnection
 
@@ -74,7 +66,7 @@ class TableSizeReporter(
         val params = arrayOf<Any>(keyspace, arrayOf<String>())
         val sig = arrayOf("java.lang.String", "[Ljava.lang.String;")
         mbs.invoke(name, "forceKeyspaceFlush", params, sig)
-        println("\n✓ Flush keyspace '$keyspace' через JMX выполнен")
+        println("✓ Flush keyspace '$keyspace' через JMX выполнен\n")
     }
 
     private fun getFromMetricsJmx(

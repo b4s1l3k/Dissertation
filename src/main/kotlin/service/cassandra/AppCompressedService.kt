@@ -57,6 +57,21 @@ class AppCompressedService(
                 }
             }
 
+    override suspend fun findByIds(ids: List<String>): List<SimpleOrderInfo?> = coroutineScope {
+        val entriesById: Map<String, CompressedOrderInfo> = withContext(Dispatchers.IO) {
+            repository.findAllById(ids).associateBy { it.id }
+        }
+
+        ids.mapNotNull { id ->
+            entriesById[id]?.let { entry ->
+                async(cpuBound) {
+                    val decompressed = compression.decompressData(entry.compressedPayload)
+                    serializer.deserializeFromBytes(decompressed, SimpleOrderInfo::class.java)
+                }
+            }
+        }.map { it.await() }
+    }
+
     override suspend fun findAll(pageSize: Int) = coroutineScope {
         var page = withContext(Dispatchers.IO) { repository.findAll(PageRequest.of(0, pageSize)) }
 

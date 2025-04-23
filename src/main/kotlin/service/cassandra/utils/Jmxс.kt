@@ -7,7 +7,7 @@ import javax.management.MBeanServerConnection
 import javax.management.ObjectName
 import kotlin.random.Random
 
-object Jmx {
+object Jmxс {
     fun wrap(delegate: MBeanServerConnection): MBeanServerConnection {
         val handler = InvocationHandler { _, method: Method, args: Array<Any>? ->
             if (method.name == "getAttribute"

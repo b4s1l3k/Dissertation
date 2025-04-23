@@ -116,7 +116,7 @@ class DatabaseInitializer(
             )
             WITH compression = {
               'class':'org.apache.cassandra.io.compress.DeflateCompressor',
-              'chunk_length_in_kb':'32'
+              'chunk_length_in_kb':'4'
             }
             AND crc_check_chance = 0.1;
             """.trimIndent()
@@ -128,7 +128,10 @@ class DatabaseInitializer(
               id text PRIMARY KEY,
               compressed_payload blob
             )
-            WITH compression = {'enabled':'false'}
+            WITH compression = {
+              'class':'org.apache.cassandra.io.compress.DeflateCompressor',
+              'chunk_length_in_kb':'4'
+            }
             AND crc_check_chance = 0.1;
             """.trimIndent()
         )
@@ -139,10 +142,7 @@ class DatabaseInitializer(
               id text PRIMARY KEY,
               compressed_payload blob
             )
-            WITH compression = {
-              'class':'org.apache.cassandra.io.compress.DeflateCompressor',
-              'chunk_length_in_kb':'128'
-            }
+            WITH compression = {'enabled':'false'}
             AND crc_check_chance = 0.1;
             """.trimIndent()
         )
