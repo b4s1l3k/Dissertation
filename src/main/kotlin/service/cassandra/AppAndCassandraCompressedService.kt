@@ -1,7 +1,7 @@
 package main.service.cassandra
 
 import kotlinx.coroutines.*
-import main.data.CompressedOrderInfo
+import main.data.PreCompressedOrderInfo
 import main.data.SimpleOrderInfo
 import main.service.compression.CompressionService
 import main.utils.SerializationService
@@ -10,15 +10,15 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import java.io.ByteArrayOutputStream
 
-@Service("appCompressedService")
-class AppCompressedService(
-    private val repository: CassandraRepository<CompressedOrderInfo, String>,
+@Service("appAndCassandraCompressedService")
+class AppAndCassandraCompressedService(
+    private val repository: CassandraRepository<PreCompressedOrderInfo, String>,
     private val compression: CompressionService,
     private val serializer: SerializationService
 ) : CassandraService<SimpleOrderInfo> {
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val cpuBound = Dispatchers.Default
-        .limitedParallelism(Runtime.getRuntime().availableProcessors())
+    private val cpuBound =
+        Dispatchers.Default.limitedParallelism(Runtime.getRuntime().availableProcessors())
 
     private val baosPool = ArrayDeque<ByteArrayOutputStream>()
 
@@ -36,7 +36,7 @@ class AppCompressedService(
                     bos.reset()
                     serializer.serializeToStream(order, bos)
                     val compressed = compression.compressData(bos.toByteArray())
-                    CompressedOrderInfo(order.id, compressed)
+                    PreCompressedOrderInfo(order.id, compressed)
                 } finally {
                     releaseStream(bos)
                 }

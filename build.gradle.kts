@@ -44,6 +44,7 @@ dependencies {
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-cbor:2.15.2")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.15.2")
     implementation("com.fasterxml.jackson.module:jackson-module-afterburner:2.18.3")
+    implementation("org.apache.poi:poi-ooxml:5.2.3")
     runtimeOnly("com.datastax.oss:java-driver-core:4.13.0")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }

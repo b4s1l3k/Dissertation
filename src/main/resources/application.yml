@@ -25,7 +25,26 @@ compression:
 
 application:
   type: benchmark # nonCompressed, onlyPreCompressed, preCompressed, cassandraCompressed, benchmark
-  count: 60000
+  count: 6000
   benchmarkType: fallback # pageSize, read, fallback
   randomCount: false
   perTime: false # TBD
+
+benchmark:
+#  orders-count: 300
+#  batch-sizes: [ 2 ]
+#  read-ratios: [ 0.75]
+#  chunk-sizes: [ 16, 32]
+#  block-sizes: [ 8192, 32768]
+#  bursts: 1
+#  inter-burst-delay-ms: 1
+  orders-count: 10000
+  batch-sizes: [ 50, 250, 500 ]
+  read-ratios: [ 0.25, 0.5, 0.75 ]
+  chunk-sizes: [ 16, 32, 64, 128, 256 ]
+  block-sizes: [ 8192, 32768, 65536, 131072 ]
+  bursts: 200
+  inter-burst-delay-ms: 10
+  parallel-bursts: 10
+  warm-up-bursts: 100
+  warm-up-delay-ms: 100

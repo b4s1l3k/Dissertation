@@ -3,10 +3,7 @@ package main
 import main.benchmark.CassandraFindAllBenchmark
 import main.benchmark.FallbackBenchmark
 import main.benchmark.ReadBenchmark
-import main.config.ApplicationProperties
-import main.config.ApplicationTypes
-import main.config.BenchmarkType
-import main.config.GeneratingProperties
+import main.config.*
 import main.runner.CassandraCompressedRunner
 import main.runner.PreCompressedRunner
 import org.springframework.boot.CommandLineRunner
@@ -14,7 +11,8 @@ import org.springframework.stereotype.Component
 
 @Component
 class Application(
-    private val props: ApplicationProperties,
+    private val appProps: ApplicationProperties,
+    private val benchProps: BenchmarkProperties,
     private val preCompressedRunner: PreCompressedRunner,
     private val cassandraCompressedRunner: CassandraCompressedRunner,
     private val pageSizeBenchmark: CassandraFindAllBenchmark,
@@ -24,37 +22,46 @@ class Application(
 ) : CommandLineRunner {
 
     override fun run(vararg args: String?) {
-        when (props.type) {
+        when (appProps.type) {
             ApplicationTypes.preCompressed ->
                 preCompressedRunner.preCompresedRun(
-                    props.count,
+                    appProps.count,
                     generatingProps.perCall,
-                    props.randomCount
+                    appProps.randomCount
                 )
 
             ApplicationTypes.cassandraCompressed ->
                 cassandraCompressedRunner.cassandraCompressedRun(
-                    props.count,
+                    appProps.count,
                     generatingProps.perCall,
-                    props.randomCount
+                    appProps.randomCount
                 )
 
-            ApplicationTypes.benchmark -> when (props.benchmarkType) {
+            ApplicationTypes.benchmark -> when (appProps.benchmarkType) {
                 BenchmarkType.pageSize ->
                     pageSizeBenchmark.runBenchmark(
-                        ordersCount = props.count,
+                        ordersCount = appProps.count,
                         perCall = generatingProps.perCall,
-                        randomCount = props.randomCount
+                        randomCount = appProps.randomCount
                     )
 
                 BenchmarkType.read ->
                     readBenchmark.runBenchmark(
-                        ordersCount = props.count
+                        ordersCount = appProps.count
                     )
 
                 BenchmarkType.fallback ->
                     fallbackBenchmark.runFallbackBenchmark(
-                        ordersCount = props.count
+                        ordersCount = benchProps.ordersCount,
+                        batchSizes = benchProps.batchSizes,
+                        readRatios = benchProps.readRatios,
+                        chunkSizes = benchProps.chunkSizes,
+                        blockSizes = benchProps.blockSizes,
+                        bursts = benchProps.bursts,
+                        parallelBursts = benchProps.parallelBursts,
+                        warmUpBursts = benchProps.warmUpBursts,
+                        warmUpDelayMs = benchProps.warmUpDelayMs,
+                        interBurstDelay = benchProps.interBurstDelayMs
                     )
 
                 BenchmarkType.parallelism ->
@@ -62,7 +69,7 @@ class Application(
             }
 
             else ->
-                println("Тип приложения ${props.type} пока не реализован")
+                println("Тип приложения ${appProps.type} пока не реализован")
         }
     }
 }

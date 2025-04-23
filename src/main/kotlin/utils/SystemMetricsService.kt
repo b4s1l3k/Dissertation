@@ -1,34 +1,74 @@
 package main.utils
 
-import org.springframework.stereotype.Service
-import org.springframework.scheduling.annotation.Scheduled
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.lang.management.ManagementFactory
 import com.sun.management.OperatingSystemMXBean
+import org.springframework.stereotype.Service
+import java.lang.management.BufferPoolMXBean
+import java.lang.management.ManagementFactory
+import java.lang.management.MemoryPoolMXBean
+import java.util.concurrent.atomic.AtomicLong
 
 @Service
 class JvmMetricsService {
+    private val osBean = ManagementFactory.getPlatformMXBean(
+        OperatingSystemMXBean::class.java
+    )
+    private val memBean = ManagementFactory.getMemoryMXBean()
+    private val poolBeans: List<MemoryPoolMXBean> =
+        ManagementFactory.getMemoryPoolMXBeans()
+    private val bufferPools: List<BufferPoolMXBean> =
+        ManagementFactory.getPlatformMXBeans(BufferPoolMXBean::class.java)
 
-    private val dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+    private val lastWall = AtomicLong(System.nanoTime())
+    private val lastCpu = AtomicLong(osBean.processCpuTime)
 
-    private val osBean: OperatingSystemMXBean by lazy {
-        ManagementFactory
-            .getPlatformMXBean(OperatingSystemMXBean::class.java)
-    }
+    data class Metrics(
+        val cpuPct: Double,
+        val heapMiB: Double,
+        val nonHeapMiB: Double,
+        val directBufferMiB: Double,
+        val poolsMiB: Double,
+        val totalUsedMiB: Double,
+        val gcPauseMs: Long
+    )
 
-    /**
-     * Печатает раз в интервал:
-     *  - процессорную нагрузку JVM‑процесса (%)
-     *  - используемый heap (MiB)
-     */
-    @Scheduled(fixedRateString = "1000")
-    fun report() {
-        val now       = LocalDateTime.now().format(dtf)
-        val cpu       = osBean.processCpuLoad.takeIf { it >= 0 }?.times(100) ?: Double.NaN
-        val runtime   = Runtime.getRuntime()
-        val usedHeap  = (runtime.totalMemory() - runtime.freeMemory()).toDouble() / (1024 * 1024)
+    @Synchronized
+    fun sample(): Metrics {
+        val nowWall = System.nanoTime()
+        val nowCpu = osBean.processCpuTime
+        val deltaW = (nowWall - lastWall.getAndSet(nowWall)).coerceAtLeast(1)
+        val deltaC = (nowCpu - lastCpu.getAndSet(nowCpu)).coerceAtLeast(0)
+        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        val cpuPct = (deltaC / (deltaW * cores) * 100.0).coerceIn(0.0, 100.0)
 
-        println("[$now] JVM CPU: ${"%.1f".format(cpu)}%, Used heap: ${"%.1f".format(usedHeap)} MiB")
+        val heapUsed = memBean.heapMemoryUsage.used.toDouble()
+        val nonHeapUsed = memBean.nonHeapMemoryUsage.used.toDouble()
+
+        val poolsUsed = poolBeans
+            .map { it.usage.used.toDouble() }
+            .sum()
+
+        val directUsed = bufferPools
+            .map { it.memoryUsed.toDouble() }
+            .sum()
+
+        val gcPause = ManagementFactory.getGarbageCollectorMXBeans()
+            .sumOf { it.collectionTime }
+
+        val toMiB = 1.0 / (1024.0 * 1024.0)
+        val heapMiB = heapUsed * toMiB
+        val nonHeapMiB = nonHeapUsed * toMiB
+        val poolsMiB = poolsUsed * toMiB
+        val directMiB = directUsed * toMiB
+        val totalMiB = heapMiB + nonHeapMiB
+
+        return Metrics(
+            cpuPct = cpuPct,
+            heapMiB = heapMiB,
+            nonHeapMiB = nonHeapMiB,
+            directBufferMiB = directMiB,
+            poolsMiB = poolsMiB,
+            totalUsedMiB = totalMiB,
+            gcPauseMs = gcPause
+        )
     }
 }
