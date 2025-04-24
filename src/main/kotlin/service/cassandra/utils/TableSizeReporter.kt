@@ -13,19 +13,39 @@ class TableSizeReporter(
     private val cassProps: CassandraProperties
 ) {
 
-    fun fetchTableSizes(vararg tables: String): Map<String, Long> {
+    fun fetchTableSizes(
+        vararg tables: String,
+        compact: Boolean = true
+    ): Map<String, Long> {
         val ks = cassProps.keyspace
         val url = JMXServiceURL(
             "service:jmx:rmi:///jndi/rmi://${cassProps.jmxHost}:${cassProps.jmxPort}/jmxrmi"
         )
         JMXConnectorFactory.connect(url).use { jmxc ->
+            val mbs = jmxc.mBeanServerConnection
 //            val raw = jmxc.mBeanServerConnection
 //            val mbs = Jmxс.wrap(raw)
 
-            val mbs = jmxc.mBeanServerConnection
+            invokeStorageService(
+                mbs, "forceKeyspaceFlush", arrayOf(ks, arrayOf<String>()), arrayOf(
+                    "java.lang.String", "[Ljava.lang.String;"
+                )
+            )
 
-            flushKeyspace(mbs, ks)
+            if (compact) {
+                invokeStorageService(
+                    mbs, "forceKeyspaceCompaction", arrayOf(true, ks, tables), arrayOf(
+                        "boolean", "java.lang.String", "[Ljava.lang.String;"
+                    )
+                )
+                invokeStorageService(
+                    mbs, "forceKeyspaceFlush", arrayOf(ks, arrayOf<String>()), arrayOf(
+                        "java.lang.String", "[Ljava.lang.String;"
+                    )
+                )
+            }
 
+            println("✅ [TableSizeReporter] Measurement complete.\n")
             return tables.associateWith { tbl ->
                 getFromMetricsJmx(mbs, ks, tbl)
                     ?: getFromLegacyJmx(mbs, ks, tbl)
@@ -69,6 +89,16 @@ class TableSizeReporter(
         println("✓ Flush keyspace '$keyspace' через JMX выполнен\n")
     }
 
+    private fun invokeStorageService(
+        mbs: javax.management.MBeanServerConnection,
+        operation: String,
+        params: Array<Any>,
+        signature: Array<String>
+    ) {
+        val name = ObjectName("org.apache.cassandra.db:type=StorageService")
+        mbs.invoke(name, operation, params, signature)
+    }
+
     private fun getFromMetricsJmx(
         mbs: javax.management.MBeanServerConnection,
         keyspace: String,
@@ -91,10 +121,10 @@ class TableSizeReporter(
         keyspace: String,
         table: String
     ): Long? = runCatching {
-        val name = ObjectName("org.apache.cassandra.db:type=ColumnFamilies,keyspace=$keyspace,columnfamily=$table")
-        (mbs.getAttribute(name, "LiveDiskSpaceUsed") as Number)
-            .toLong()
-            .takeIf { it > 0 }
+        val name = ObjectName(
+            "org.apache.cassandra.db:type=ColumnFamilies,keyspace=$keyspace,columnfamily=$table"
+        )
+        (mbs.getAttribute(name, "LiveDiskSpaceUsed") as Number).toLong().takeIf { it > 0 }
     }.getOrNull()
 
     private fun getFromSstablesView(table: String): Long? = runCatching {

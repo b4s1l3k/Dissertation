@@ -52,12 +52,11 @@ class FallbackBenchmark(
     private val sizeReporter: TableSizeReporter
 ) {
 
-    private data class BurstResult(
+    private data class PhaseResult(
+        val phase: String,
         val timeMs: Long,
-        val msPerOp: Double,
         val tps: Double,
-        val cpu: Double,
-        val memMiB: Double
+        var cpu: Double
     )
 
     private val services = mapOf(
@@ -73,8 +72,9 @@ class FallbackBenchmark(
         sheet.createRow(rowIdx++).apply {
             listOf(
                 "strategy", "blockKiB", "chunkKiB", "batch", "readRatio",
-                "ms/op_P95", "tps_P95", "cpu_P95", "mem_P95_MiB",
-                "simple_KiB", "cassandra_KiB", "precomp_KiB", "appcomp_KiB"
+                "phase",
+                "ms/op_P95", "tps_P95", "cpu_P95",
+                "simple_MiB", "cassandra_MiB", "precomp_MiB", "appcomp_MiB"
             ).forEachIndexed { i, h -> createCell(i).setCellValue(h) }
         }
     }
@@ -88,9 +88,8 @@ class FallbackBenchmark(
             val sh = workbook.createSheet("batch_$batch")
 
             val hdr = sh.createRow(0)
-            for (i in 0 until headerRow.lastCellNum) {
+            for (i in (0 until headerRow.lastCellNum))
                 hdr.createCell(i).setCellValue(headerRow.getCell(i).stringCellValue)
-            }
             batchRowIndex[batch] = 1
             sh
         }
@@ -106,7 +105,6 @@ class FallbackBenchmark(
         warmUpBursts: Int,
         warmUpDelayMs: Long,
         interBurstDelay: Long,
-        errThreshold: Double = 0.1,
         seed: Long = 42L
     ): Unit = runBlocking {
 
@@ -117,10 +115,14 @@ class FallbackBenchmark(
             .mapIndexed { i, o -> o.copy(id = "${o.id}_$i") }
 
         blockSizes.forEachIndexed { bsIdx, block ->
+            clearAllTables()
+
             snappy.blockSize = block
             println("\n>>> Snappy.blockSize = $block B")
 
             chunkSizes.forEachIndexed { ckIdx, chunkKb ->
+                clearAllTables()
+
                 println("\n → Deflate chunk_length_in_kb = $chunkKb KiB")
                 alterDeflate(chunkKb)
 
@@ -180,12 +182,7 @@ class FallbackBenchmark(
         println("\n✅  All benchmarks completed; results saved to benchmark_results.xlsx")
 
         val elapsed = (System.currentTimeMillis() - startTime) / 1000
-        if (elapsed < 60) {
-            println("\nВремени потрачено: $elapsed с")
-        } else {
-            println("\nВремени потрачено: ${elapsed / 60} м ${elapsed % 60} с")
-        }
-
+        println("\n⏱  Total time: ${elapsed / 60} m ${elapsed % 60}s")
         exitProcess(0)
     }
 
@@ -207,7 +204,7 @@ class FallbackBenchmark(
     }
 
     private fun alterDeflate(chunkKb: Int) {
-        listOf(CassandraCompressedTable, AppCompressedTable).forEach { tbl ->
+        listOf(CassandraCompressedTable, PrecompressedTable).forEach { tbl ->
             cql.execute(
                 "ALTER TABLE dissertation.$tbl " +
                         "WITH compression={'class':'org.apache.cassandra.io.compress.DeflateCompressor'," +
@@ -224,6 +221,17 @@ class FallbackBenchmark(
         if (actual != expected) {
             error("Неправильный chunk_length_in_kb для $tableName: ожидается $expected, а реально $actual")
         }
+    }
+
+    private suspend fun clearAllTables() = coroutineScope {
+        listOf(
+            simpleService,
+            cassandraCompressedService,
+            appCompressedService,
+            doubleCompressedService
+        ).map { svc ->
+            launch(Dispatchers.IO) { svc.deleteAll() }
+        }.joinAll()
     }
 
     private fun fetchCompressionOptions(tableName: String): Map<String, String> {
@@ -254,13 +262,22 @@ class FallbackBenchmark(
     ) {
         println("--- $strategy | block=$blockSize B | chunk=$chunkKb KiB | batch=$batchSize | read=$readRatio ---")
 
+        val writesPerBurst = (batchSize * (1 - readRatio)).toInt().coerceAtLeast(1)
+        val readsPerBurst = batchSize - writesPerBurst
+
         repeat(warmUpBursts) { i ->
-            runBurst(svc, orders, batchSize, readRatio, Random(seed + i))
+            val rnd = Random(seed + i)
+            svc.save(List(writesPerBurst) { orders.random(rnd) })
+            svc.findById(orders.random(rnd).id)
             delay(warmUpDelayMs)
         }
 
+        val writeStats = mutableListOf<PhaseResult>()
+        val readStats = mutableListOf<PhaseResult>()
+        val cpuWriteSamples = mutableListOf<Double>()
+        val cpuReadSamples = mutableListOf<Double>()
+
         val sem = Semaphore(parallel)
-        val stats = mutableListOf<BurstResult>()
 
         coroutineScope {
             repeat(bursts) { i ->
@@ -268,17 +285,33 @@ class FallbackBenchmark(
                     sem.acquire()
                     try {
                         val rnd = Random(seed + warmUpBursts + i)
-                        val elapsed = measureTimeMillis {
-                            runBurst(svc, orders, batchSize, readRatio, rnd)
+
+                        val wStart = jvm.snap()
+                        val wTime = measureTimeMillis {
+                            svc.save(List(writesPerBurst) { orders.random(rnd) })
                         }
-                        val m = jvm.sample()
-                        stats += BurstResult(
-                            timeMs = elapsed,
-                            msPerOp = elapsed.toDouble() / batchSize,
-                            tps = if (elapsed > 0) batchSize * 1000.0 / elapsed else Double.NaN,
-                            cpu = m.cpuPct,
-                            memMiB = m.totalUsedMiB
+                        val wCpu = jvm.cpuLoadPct(wStart, jvm.snap())
+                        writeStats += PhaseResult(
+                            phase = "write",
+                            timeMs = wTime,
+                            tps = if (wTime > 0) writesPerBurst * 1_000.0 / wTime else 0.0,
+                            cpu = wCpu
                         )
+                        cpuWriteSamples += wCpu
+
+                        val rStart = jvm.snap()
+                        val rTime = measureTimeMillis {
+                            val ids = List(readsPerBurst) { orders.random(rnd).id }
+                            svc.findByIds(ids)
+                        }
+                        val rCpu = jvm.cpuLoadPct(rStart, jvm.snap())
+                        readStats += PhaseResult(
+                            phase = "read",
+                            timeMs = rTime,
+                            tps = if (rTime > 0) readsPerBurst * 1_000.0 / rTime else 0.0,
+                            cpu = rCpu
+                        )
+                        cpuReadSamples += rCpu
                     } finally {
                         sem.release()
                     }
@@ -287,77 +320,84 @@ class FallbackBenchmark(
             }
         }
 
+        val cpuWriteP95 = cpuWriteSamples.p95()
+        val cpuReadP95 = cpuReadSamples.p95()
+        writeStats.forEach { it.cpu = cpuWriteP95 }
+        readStats.forEach { it.cpu = cpuReadP95 }
+
         persistMetrics(
-            strategy, blockSize, chunkKb, batchSize, readRatio,
-            stats, sizeRow
+            strategy = strategy,
+            blockKiB = blockSize / 1024,
+            chunkKiB = chunkKb,
+            batch = batchSize,
+            readRatio = readRatio,
+            write = writeStats,
+            read = readStats,
+            sizeRow = sizeRow
         )
     }
 
-    private suspend fun runBurst(
-        svc: CassandraService<SimpleOrderInfo>,
-        orders: List<SimpleOrderInfo>,
-        batchSize: Int,
-        readRatio: Double,
-        rnd: Random
-    ) {
-        val writes = (batchSize * (1 - readRatio)).toInt().coerceAtLeast(1)
-        svc.save(List(writes) { orders.random(rnd) })
-
-        val readCount = batchSize - writes
-        val readIds = List(readCount) { orders.random(rnd).id }
-
-        svc.findByIds(readIds)
-    }
+    private fun List<Double>.p95(): Double =
+        if (isEmpty()) Double.NaN
+        else sorted()[((size * 0.95).toInt()).coerceAtMost(lastIndex)]
 
     private fun persistMetrics(
         strategy: String,
-        block: Int,
-        chunkKb: Int,
+        blockKiB: Int,
+        chunkKiB: Int,
         batch: Int,
         readRatio: Double,
-        results: List<BurstResult>,
+        write: List<PhaseResult>,
+        read: List<PhaseResult>,
         sizeRow: DoubleArray
     ) {
-        fun List<Double>.p95() = this[(size * 0.95).toInt().coerceAtMost(lastIndex)]
+        listOf(write, read).forEach { stats ->
+            val phase = stats.first().phase
+            val perOpP95 = stats.map {
+                it.timeMs / (if (phase == "write") (batch * (1 - readRatio))
+                else (batch * readRatio)).coerceAtLeast(1.0)
+            }.p95()
+            val tpsP95 = stats.map { it.tps }.p95()
+            val cpuP95 = stats.map { it.cpu }.p95()
 
-        val perOp = results.map { it.msPerOp }.sorted().p95()
-        val tps = results.map { it.tps }.sorted().p95()
-        val cpu = results.map { it.cpu }.sorted().p95()
-        val mem = results.map { it.memMiB }.sorted().p95()
+            sheet.createRow(rowIdx++).apply {
+                createCell(0).setCellValue(strategy)
+                createCell(1).setCellValue(blockKiB.toDouble())
+                createCell(2).setCellValue(chunkKiB.toDouble())
+                createCell(3).setCellValue(batch.toDouble())
+                createCell(4).setCellValue(readRatio)
 
-        sheet.createRow(rowIdx++).apply {
-            createCell(0).setCellValue(strategy)
-            createCell(1).setCellValue(block.toDouble()/1024)
-            createCell(2).setCellValue(chunkKb.toDouble())
-            createCell(3).setCellValue(batch.toDouble())
-            createCell(4).setCellValue(readRatio)
-            createCell(5).setCellValue(perOp)
-            createCell(6).setCellValue(tps)
-            createCell(7).setCellValue(cpu)
-            createCell(8).setCellValue(mem)
-            createCell(9).setCellValue(sizeRow[0])
-            createCell(10).setCellValue(sizeRow[1])
-            createCell(11).setCellValue(sizeRow[2])
-            createCell(12).setCellValue(sizeRow[3])
+                createCell(5).setCellValue(phase)
+
+                createCell(6).setCellValue(perOpP95)
+                createCell(7).setCellValue(tpsP95)
+                createCell(8).setCellValue(cpuP95)
+
+                createCell(9).setCellValue(sizeRow[0] / 1024)
+                createCell(10).setCellValue(sizeRow[1] / 1024)
+                createCell(11).setCellValue(sizeRow[2] / 1024)
+                createCell(12).setCellValue(sizeRow[3] / 1024)
+            }
+
+            val sh = sheetForBatch(batch)
+            val idx = batchRowIndex.getValue(batch)
+            sh.createRow(idx).apply {
+                createCell(0).setCellValue(strategy)
+                createCell(1).setCellValue(blockKiB.toDouble())
+                createCell(2).setCellValue(chunkKiB.toDouble())
+                createCell(3).setCellValue(batch.toDouble())
+                createCell(4).setCellValue(readRatio)
+                createCell(5).setCellValue(phase)
+                createCell(6).setCellValue(perOpP95)
+                createCell(7).setCellValue(tpsP95)
+                createCell(8).setCellValue(cpuP95)
+
+                createCell(9).setCellValue(sizeRow[0] / 1024)
+                createCell(10).setCellValue(sizeRow[1] / 1024)
+                createCell(11).setCellValue(sizeRow[2] / 1024)
+                createCell(12).setCellValue(sizeRow[3] / 1024)
+            }
+            batchRowIndex[batch] = idx + 1
         }
-
-        val sh = sheetForBatch(batch)
-        val idxB = batchRowIndex.getValue(batch)
-        sh.createRow(idxB).apply {
-            createCell(0).setCellValue(strategy)
-            createCell(1).setCellValue(block.toDouble()/1024)
-            createCell(2).setCellValue(chunkKb.toDouble())
-            createCell(3).setCellValue(batch.toDouble())
-            createCell(4).setCellValue(readRatio)
-            createCell(5).setCellValue(perOp)
-            createCell(6).setCellValue(tps)
-            createCell(7).setCellValue(cpu)
-            createCell(8).setCellValue(mem)
-            createCell(9).setCellValue(sizeRow[0])
-            createCell(10).setCellValue(sizeRow[1])
-            createCell(11).setCellValue(sizeRow[2])
-            createCell(12).setCellValue(sizeRow[3])
-        }
-        batchRowIndex[batch] = idxB + 1
     }
 }
