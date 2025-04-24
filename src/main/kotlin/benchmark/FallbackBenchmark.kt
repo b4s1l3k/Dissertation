@@ -30,6 +30,9 @@ private const val CassandraCompressedTable = "cassandra_order_info"
 private const val AppCompressedTable = "app_compressed_order_info"
 private const val PrecompressedTable = "precompressed_order_info"
 
+private val workbook = XSSFWorkbook()
+private val sheet = workbook.createSheet("Results")
+
 @Service
 class FallbackBenchmark(
     private val generator: DataGenerationService,
@@ -64,19 +67,33 @@ class FallbackBenchmark(
         DoubleCompressedStrategy to doubleCompressedService
     )
 
-    private val workbook = XSSFWorkbook()
-    private val sheet = workbook.createSheet("Results")
     private var rowIdx = 0
 
     init {
         sheet.createRow(rowIdx++).apply {
             listOf(
-                "strategy", "blockB", "chunkKiB", "batch", "readRatio",
+                "strategy", "blockKiB", "chunkKiB", "batch", "readRatio",
                 "ms/op_P95", "tps_P95", "cpu_P95", "mem_P95_MiB",
                 "simple_KiB", "cassandra_KiB", "precomp_KiB", "appcomp_KiB"
             ).forEachIndexed { i, h -> createCell(i).setCellValue(h) }
         }
     }
+
+    private val batchSheets = mutableMapOf<Int, org.apache.poi.ss.usermodel.Sheet>()
+    private val batchRowIndex = mutableMapOf<Int, Int>()
+    private val headerRow = sheet.getRow(0)
+
+    private fun sheetForBatch(batch: Int): org.apache.poi.ss.usermodel.Sheet =
+        batchSheets.getOrPut(batch) {
+            val sh = workbook.createSheet("batch_$batch")
+
+            val hdr = sh.createRow(0)
+            for (i in 0 until headerRow.lastCellNum) {
+                hdr.createCell(i).setCellValue(headerRow.getCell(i).stringCellValue)
+            }
+            batchRowIndex[batch] = 1
+            sh
+        }
 
     fun runFallbackBenchmark(
         ordersCount: Int,
@@ -94,6 +111,8 @@ class FallbackBenchmark(
     ): Unit = runBlocking {
 
         println("\n=== Generating $ordersCount random orders ===")
+        val startTime = System.currentTimeMillis()
+
         val orders = generator.generateOrders(ordersCount)
             .mapIndexed { i, o -> o.copy(id = "${o.id}_$i") }
 
@@ -159,6 +178,14 @@ class FallbackBenchmark(
         FileOutputStream("benchmark_results.xlsx").use { workbook.write(it) }
         workbook.close()
         println("\n✅  All benchmarks completed; results saved to benchmark_results.xlsx")
+
+        val elapsed = (System.currentTimeMillis() - startTime) / 1000
+        if (elapsed < 60) {
+            println("\nВремени потрачено: $elapsed с")
+        } else {
+            println("\nВремени потрачено: ${elapsed / 60} м ${elapsed % 60} с")
+        }
+
         exitProcess(0)
     }
 
@@ -180,19 +207,14 @@ class FallbackBenchmark(
     }
 
     private fun alterDeflate(chunkKb: Int) {
-        cql.execute(
-            "ALTER TABLE dissertation.$CassandraCompressedTable " +
-                    "WITH compression={'class':'org.apache.cassandra.io.compress.DeflateCompressor'," +
-                    "'chunk_length_in_kb':$chunkKb}"
-        )
-        verifyChunkLength(CassandraCompressedTable, chunkKb)
-
-        cql.execute(
-            "ALTER TABLE dissertation.$AppCompressedTable " +
-                    "WITH compression={'class':'org.apache.cassandra.io.compress.DeflateCompressor'," +
-                    "'chunk_length_in_kb':$chunkKb}"
-        )
-        verifyChunkLength(AppCompressedTable, chunkKb)
+        listOf(CassandraCompressedTable, AppCompressedTable).forEach { tbl ->
+            cql.execute(
+                "ALTER TABLE dissertation.$tbl " +
+                        "WITH compression={'class':'org.apache.cassandra.io.compress.DeflateCompressor'," +
+                        "'chunk_length_in_kb':$chunkKb}"
+            )
+            verifyChunkLength(tbl, chunkKb)
+        }
     }
 
     private fun verifyChunkLength(tableName: String, expected: Int) {
@@ -244,19 +266,22 @@ class FallbackBenchmark(
             repeat(bursts) { i ->
                 launch(Dispatchers.IO) {
                     sem.acquire()
-                    val rnd = Random(seed + warmUpBursts + i)
-                    val elapsed = measureTimeMillis {
-                        runBurst(svc, orders, batchSize, readRatio, rnd)
+                    try {
+                        val rnd = Random(seed + warmUpBursts + i)
+                        val elapsed = measureTimeMillis {
+                            runBurst(svc, orders, batchSize, readRatio, rnd)
+                        }
+                        val m = jvm.sample()
+                        stats += BurstResult(
+                            timeMs = elapsed,
+                            msPerOp = elapsed.toDouble() / batchSize,
+                            tps = if (elapsed > 0) batchSize * 1000.0 / elapsed else Double.NaN,
+                            cpu = m.cpuPct,
+                            memMiB = m.totalUsedMiB
+                        )
+                    } finally {
+                        sem.release()
                     }
-                    val m = jvm.sample()
-                    stats += BurstResult(
-                        timeMs = elapsed,
-                        msPerOp = elapsed.toDouble() / batchSize,
-                        tps = if (elapsed > 0) batchSize * 1000.0 / elapsed else Double.NaN,
-                        cpu = m.cpuPct,
-                        memMiB = m.totalUsedMiB
-                    )
-                    sem.release()
                     delay(interDelayMs)
                 }
             }
@@ -291,7 +316,7 @@ class FallbackBenchmark(
         batch: Int,
         readRatio: Double,
         results: List<BurstResult>,
-        sizeRow: DoubleArray?
+        sizeRow: DoubleArray
     ) {
         fun List<Double>.p95() = this[(size * 0.95).toInt().coerceAtMost(lastIndex)]
 
@@ -302,7 +327,7 @@ class FallbackBenchmark(
 
         sheet.createRow(rowIdx++).apply {
             createCell(0).setCellValue(strategy)
-            createCell(1).setCellValue(block.toDouble())
+            createCell(1).setCellValue(block.toDouble()/1024)
             createCell(2).setCellValue(chunkKb.toDouble())
             createCell(3).setCellValue(batch.toDouble())
             createCell(4).setCellValue(readRatio)
@@ -310,15 +335,29 @@ class FallbackBenchmark(
             createCell(6).setCellValue(tps)
             createCell(7).setCellValue(cpu)
             createCell(8).setCellValue(mem)
-
-            if (sizeRow != null) {
-                createCell(9).setCellValue(sizeRow[0])
-                createCell(10).setCellValue(sizeRow[1])
-                createCell(11).setCellValue(sizeRow[2])
-                createCell(12).setCellValue(sizeRow[3])
-            } else {
-                (9..12).forEach { idx -> createCell(idx) }
-            }
+            createCell(9).setCellValue(sizeRow[0])
+            createCell(10).setCellValue(sizeRow[1])
+            createCell(11).setCellValue(sizeRow[2])
+            createCell(12).setCellValue(sizeRow[3])
         }
+
+        val sh = sheetForBatch(batch)
+        val idxB = batchRowIndex.getValue(batch)
+        sh.createRow(idxB).apply {
+            createCell(0).setCellValue(strategy)
+            createCell(1).setCellValue(block.toDouble()/1024)
+            createCell(2).setCellValue(chunkKb.toDouble())
+            createCell(3).setCellValue(batch.toDouble())
+            createCell(4).setCellValue(readRatio)
+            createCell(5).setCellValue(perOp)
+            createCell(6).setCellValue(tps)
+            createCell(7).setCellValue(cpu)
+            createCell(8).setCellValue(mem)
+            createCell(9).setCellValue(sizeRow[0])
+            createCell(10).setCellValue(sizeRow[1])
+            createCell(11).setCellValue(sizeRow[2])
+            createCell(12).setCellValue(sizeRow[3])
+        }
+        batchRowIndex[batch] = idxB + 1
     }
 }
