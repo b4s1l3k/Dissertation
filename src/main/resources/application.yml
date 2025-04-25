@@ -10,8 +10,6 @@ spring:
       schema-action: create-if-not-exists
       jmx-host: localhost
       jmx-port: 7199
-      request:
-        timeout: 5s
 
 generating:
   perCall: 150
@@ -27,24 +25,24 @@ compression:
 
 application:
   type: benchmark # nonCompressed, onlyPreCompressed, preCompressed, cassandraCompressed, benchmark
-  count: 6000
+  count: 100002
   benchmarkType: fallback # pageSize, read, fallback
   randomCount: false
   perTime: false # TBD
 
 benchmark:
 #  orders-count: 8000
-#  batch-sizes: [ 50, 100 ]
-#  read-ratios: [ 0.5 ]
-#  chunk-sizes: [ 4, 8, 16]
-#  block-sizes: [ 4096, 8192, 16384]
+#  batch-sizes: [ 50, 100]
+#  read-ratios: [ 0.5, 0.75 ]
+#  chunk-sizes: [ 4, 8]
+#  block-sizes: [ 4096, 8192]
 #  bursts: 100
 #  inter-burst-delay-ms: 1
-  orders-count: 80000
-  batch-sizes: [ 50, 250, 500, 1000 ]
-  read-ratios: [ 0.25, 0.5, 0.75 ]
-  chunk-sizes: [ 4, 8, 16, 32, 64, 128, 256 ]
+  orders-count: 100000
   block-sizes: [ 4096, 8192, 16384, 32768, 65536, 131072, 262144 ]
+  chunk-sizes: [ 4, 8, 16, 32, 64, 128, 256 ]
+  batch-sizes: [ 50, 250, 500, 1000, 1500]
+  read-ratios: [ 0.25, 0.5, 0.75 ]
   bursts: 100
   inter-burst-delay-ms: 1
   parallel-bursts: 10

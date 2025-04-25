@@ -1,4 +1,4 @@
-package main.service.report
+package main.benchmark.utils
 
 import org.apache.poi.ss.usermodel.Sheet
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
@@ -72,6 +72,7 @@ class BenchmarkReportService {
     fun saveTo(path: String = "benchmark_results.xlsx") {
         FileOutputStream(path).use { wb.write(it) }
         wb.close()
+        println("\n✓ Results saved to $path")
     }
 
     private fun writeRow(

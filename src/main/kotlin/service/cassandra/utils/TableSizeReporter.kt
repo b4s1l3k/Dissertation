@@ -55,6 +55,24 @@ class TableSizeReporter(
         }
     }
 
+    fun clearSnapshots() {
+        val url = JMXServiceURL(
+            "service:jmx:rmi:///jndi/rmi://${cassProps.jmxHost}:${cassProps.jmxPort}/jmxrmi"
+        )
+        JMXConnectorFactory.connect(url).use { jmxc ->
+            val mbs = jmxc.mBeanServerConnection
+            val svc = ObjectName("org.apache.cassandra.db:type=StorageService")
+            mbs.invoke(
+                svc,
+                "clearSnapshot",
+                arrayOf<Any>("", arrayOf<String>()),
+                arrayOf("java.lang.String", "[Ljava.lang.String;")
+            )
+            println("\n✓ All snapshots cleared")
+        }
+    }
+
+
     fun reportTableSizes(vararg tables: String) {
         val ks = cassProps.keyspace
         println("\n=== Оценка размера таблиц в keyspace '$ks' ===")

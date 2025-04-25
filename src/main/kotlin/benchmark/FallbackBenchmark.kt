@@ -2,17 +2,16 @@ package main.benchmark
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
+import main.benchmark.utils.BenchmarkReportService
 import main.data.SimpleOrderInfo
 import main.service.cassandra.CassandraService
 import main.service.cassandra.utils.TableSizeReporter
 import main.service.compression.SnappyCompressionProtocol
 import main.service.generator.DataGenerationService
 import main.utils.JvmMetricsService
-import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.cassandra.core.cql.CqlTemplate
 import org.springframework.stereotype.Service
-import java.io.FileOutputStream
 import kotlin.random.Random
 import kotlin.system.exitProcess
 import kotlin.system.measureTimeMillis
@@ -30,11 +29,6 @@ private const val CassandraCompressedTable = "cassandra_order_info"
 private const val AppCompressedTable = "app_compressed_order_info"
 private const val PrecompressedTable = "precompressed_order_info"
 
-private val workbook = XSSFWorkbook()
-private val sheet = workbook.createSheet("Results")
-private val sizeSheet = workbook.createSheet("Sizes")
-private var sizeRowIdx = 0
-
 @Service
 class FallbackBenchmark(
     private val generator: DataGenerationService,
@@ -51,8 +45,11 @@ class FallbackBenchmark(
     private val cql: CqlTemplate,
     private val snappy: SnappyCompressionProtocol,
     private val jvm: JvmMetricsService,
-    private val sizeReporter: TableSizeReporter
+    private val sizeReporter: TableSizeReporter,
+    private val report: BenchmarkReportService
 ) {
+    @Volatile
+    private var shutdownRequested = false
 
     private data class PhaseResult(
         val phase: String,
@@ -68,39 +65,6 @@ class FallbackBenchmark(
         DoubleCompressedStrategy to doubleCompressedService
     )
 
-    private var rowIdx = 0
-
-    init {
-        sheet.createRow(rowIdx++).apply {
-            listOf(
-                "strategy", "blockKiB", "chunkKiB", "batch", "readRatio",
-                "phase", "ms/op_P95", "tps_P95", "cpu_P95",
-                "simple_MiB", "cassandra_MiB", "precomp_MiB", "appcomp_MiB"
-            ).forEachIndexed { i, h -> createCell(i).setCellValue(h) }
-        }
-
-        sizeSheet.createRow(sizeRowIdx++).apply {
-            listOf(
-                "blockKiB", "chunkKiB",
-                "simple_MiB", "cassandra_MiB", "precomp_MiB", "appcomp_MiB"
-            ).forEachIndexed { i, h -> createCell(i).setCellValue(h) }
-        }
-    }
-
-    private val batchSheets = mutableMapOf<Int, org.apache.poi.ss.usermodel.Sheet>()
-    private val batchRowIndex = mutableMapOf<Int, Int>()
-    private val headerRow = sheet.getRow(0)
-
-    private fun sheetForBatch(batch: Int) =
-        batchSheets.getOrPut(batch) {
-            val sh = workbook.createSheet("batch_$batch")
-            val hdr = sh.createRow(0)
-            for (i in 0 until headerRow.lastCellNum)
-                hdr.createCell(i).setCellValue(headerRow.getCell(i).stringCellValue)
-            batchRowIndex[batch] = 1
-            sh
-        }
-
     fun runFallbackBenchmark(
         ordersCount: Int,
         batchSizes: List<Int>,
@@ -113,88 +77,92 @@ class FallbackBenchmark(
         warmUpDelayMs: Long,
         interBurstDelay: Long,
         seed: Long = 42L
-    ): Unit = runBlocking {
+    ) {
+        val handler = CoroutineExceptionHandler { _, ex ->
+            println("⛔ Cassandra failed: ${ex.message}")
+            shutdownRequested = true
+        }
 
-        println("=== Generating $ordersCount random orders ===")
-        val startTime = System.currentTimeMillis()
+        runBlocking(handler) {
+            try {
+                println("=== Generating $ordersCount random orders ===")
+                val startTime = System.currentTimeMillis()
 
-        val orders = generator.generateOrders(ordersCount)
-            .mapIndexed { i, o -> o.copy(id = "${o.id}_$i") }
+                val orders = generator.generateOrders(ordersCount)
+                    .mapIndexed { i, o -> o.copy(id = "${o.id}_$i") }
 
-        blockSizes.forEachIndexed { bsIdx, blockB ->
-            clearAllTables()
+                blockSizes.forEachIndexed { bsIdx, blockB ->
+                    sizeReporter.clearSnapshots()
+                    clearAllTables()
 
-            snappy.blockSize = blockB
-            println("\n>>> Snappy.blockSize = $blockB B\n")
+                    snappy.blockSize = blockB
+                    println("\n>>> Snappy.blockSize = $blockB B")
 
-            chunkSizes.forEachIndexed { ckIdx, chunkKb ->
-                clearAllTables()
+                    chunkSizes.forEachIndexed { ckIdx, chunkKb ->
+                        clearAllTables()
 
-                println(" → Deflate chunk_length_in_kb = $chunkKb KiB")
-                alterDeflate(chunkKb)
 
-                val toTest = services.filter { (strategy, _) ->
-                    val usesSnappy = strategy in snappyStrategies
-                    val usesDeflate = strategy in deflateStrategies
+                        println(" → Deflate chunk_length_in_kb = $chunkKb KiB")
+                        alterDeflate(chunkKb)
 
-                    val blockOk = usesSnappy || strategy in deflateStrategies || bsIdx == 0
-                    val chunkOk = usesDeflate || ckIdx == 0
+                        val toTest = services.filter { (strategy, _) ->
+                            val usesSnappy = strategy in snappyStrategies
+                            val usesDeflate = strategy in deflateStrategies
 
-                    blockOk && chunkOk
-                }
+                            val blockOk = usesSnappy || strategy in deflateStrategies || bsIdx == 0
+                            val chunkOk = usesDeflate || ckIdx == 0
 
-                preload(orders, parallelBursts, toTest)
+                            blockOk && chunkOk
+                        }
 
-                val sizesKiB = sizeReporter.fetchTableSizes(
-                    SimpleTable,
-                    CassandraCompressedTable,
-                    PrecompressedTable,
-                    AppCompressedTable
-                ).mapValues { it.value / 1024.0 }
+                        preload(orders, parallelBursts, toTest)
 
-                val sizeRow = doubleArrayOf(
-                    sizesKiB[SimpleTable] ?: 0.0,
-                    sizesKiB[CassandraCompressedTable] ?: 0.0,
-                    sizesKiB[PrecompressedTable] ?: 0.0,
-                    sizesKiB[AppCompressedTable] ?: 0.0
-                )
-                writeSizes(blockB / 1024, chunkKb, sizeRow)
+                        val sizesKiB = sizeReporter.fetchTableSizes(
+                            SimpleTable,
+                            CassandraCompressedTable,
+                            PrecompressedTable,
+                            AppCompressedTable
+                        ).mapValues { it.value / 1024.0 }
 
-                toTest.forEach { (strategy, svc) ->
-                    readRatios.forEach { rr ->
-                        batchSizes.forEach { batch ->
-                            runScenario(
-                                strategy, svc, orders,
-                                blockB, chunkKb, batch, rr,
-                                bursts, parallelBursts,
-                                warmUpBursts, warmUpDelayMs,
-                                interBurstDelay, seed,
-                                sizeRow
-                            )
+                        val sizeRow = doubleArrayOf(
+                            sizesKiB[SimpleTable] ?: 0.0,
+                            sizesKiB[CassandraCompressedTable] ?: 0.0,
+                            sizesKiB[PrecompressedTable] ?: 0.0,
+                            sizesKiB[AppCompressedTable] ?: 0.0
+                        )
+
+                        report.writeSizes(blockB / 1024, chunkKb, sizeRow)
+
+                        toTest.forEach { (strategy, svc) ->
+                            readRatios.forEach { rr ->
+                                batchSizes.forEach { batch ->
+                                    runScenario(
+                                        strategy, svc, orders,
+                                        blockB, chunkKb, batch, rr,
+                                        bursts, parallelBursts,
+                                        warmUpBursts, warmUpDelayMs,
+                                        interBurstDelay, seed,
+                                        sizeRow
+                                    )
+                                }
+                            }
                         }
                     }
                 }
+
+                val elapsed = (System.currentTimeMillis() - startTime) / 1000
+                println("⏱  Total time: ${elapsed / 60} m ${elapsed % 60} s")
+            } finally {
+                report.saveTo("benchmark_results.xlsx")
+
+                if (shutdownRequested) {
+                    println("✔ Partial results saved, graceful shutdown")
+                } else {
+                    println("✔ All benchmarks completed successfully")
+                }
+
+                exitProcess(0)
             }
-        }
-
-        FileOutputStream("benchmark_results.xlsx").use { workbook.write(it) }
-        workbook.close()
-        println("✓ Results saved to benchmark_results.xlsx")
-
-        val elapsed = (System.currentTimeMillis() - startTime) / 1000
-        println("⏱  Total time: ${elapsed / 60} m ${elapsed % 60} s")
-        exitProcess(0)
-    }
-
-
-    private fun writeSizes(blockKiB: Int, chunkKiB: Int, sz: DoubleArray) {
-        sizeSheet.createRow(sizeRowIdx++).apply {
-            createCell(0).setCellValue(blockKiB.toDouble())
-            createCell(1).setCellValue(chunkKiB.toDouble())
-            createCell(2).setCellValue(sz[0] / 1024)
-            createCell(3).setCellValue(sz[1] / 1024)
-            createCell(4).setCellValue(sz[2] / 1024)
-            createCell(5).setCellValue(sz[3] / 1024)
         }
     }
 
@@ -209,14 +177,14 @@ class FallbackBenchmark(
             svc.deleteAll()
             coroutineScope {
                 orders.chunked((orders.size + parallelism - 1) / parallelism).map { chunk ->
-                    launch(Dispatchers.IO) { svc.save(chunk) }
+                    launch(Dispatchers.IO) { retry { svc.save(chunk) } }
                 }
             }
         }
     }
 
     private fun clearAllTables() {
-        println("\n")
+        println()
         listOf(
             SimpleTable,
             CassandraCompressedTable,
@@ -281,8 +249,14 @@ class FallbackBenchmark(
 
         repeat(warmUpBursts) { i ->
             val rnd = Random(seed + i)
-            svc.save(List(writesPerBurst) { orders.random(rnd) })
-            svc.findById(orders.random(rnd).id)
+            retry {
+                svc.save(List(writesPerBurst) {
+                    orders.random(rnd)
+                })
+            }
+            retry {
+                svc.findById(orders.random(rnd).id)
+            }
             delay(warmUpDelayMs)
         }
 
@@ -292,16 +266,19 @@ class FallbackBenchmark(
         val cpuReadSamples = mutableListOf<Double>()
 
         val sem = Semaphore(parallel)
-        coroutineScope {
+        supervisorScope {
             repeat(bursts) { i ->
                 launch(Dispatchers.IO) {
+                    if (shutdownRequested) return@launch
                     sem.acquire()
                     try {
                         val rnd = Random(seed + warmUpBursts + i)
 
                         val wStart = jvm.snap()
                         val wTime = measureTimeMillis {
-                            svc.save(List(writesPerBurst) { orders.random(rnd) })
+                            retry(attempts = 20) {
+                                svc.save(List(writesPerBurst) { orders.random(rnd) })
+                            }
                         }
                         val wCpu = jvm.cpuLoadPct(wStart, jvm.snap())
                         writeStats += PhaseResult(
@@ -315,16 +292,23 @@ class FallbackBenchmark(
                         val rStart = jvm.snap()
                         val rTime = measureTimeMillis {
                             val ids = List(readsPerBurst) { orders.random(rnd).id }
-                            svc.findByIds(ids)
+                            retry(attempts = 30) {
+                                svc.findByIds(ids)
+                            }
                         }
                         val rCpu = jvm.cpuLoadPct(rStart, jvm.snap())
-                        readStats += PhaseResult(
-                            phase = "read",
-                            timeMs = rTime,
-                            tps = if (rTime > 0) readsPerBurst * 1_000.0 / rTime else 0.0,
-                            cpu = rCpu
-                        )
-                        cpuReadSamples += rCpu
+                        synchronized(readStats) {
+                            readStats += PhaseResult(
+                                "read",
+                                rTime,
+                                if (rTime > 0) readsPerBurst * 1_000.0 / rTime else 0.0,
+                                rCpu
+                            )
+                            cpuReadSamples += rCpu
+                        }
+                    } catch (ex: Exception) {
+                        println("⛔ burst $i failed: ${ex.message}")
+                        shutdownRequested = true
                     } finally {
                         sem.release()
                     }
@@ -350,9 +334,6 @@ class FallbackBenchmark(
         )
     }
 
-    private fun List<Double>.p95() =
-        if (isEmpty()) Double.NaN else sorted()[((size * 0.95).toInt()).coerceAtMost(lastIndex)]
-
     private fun persistMetrics(
         strategy: String,
         blockKiB: Int,
@@ -363,38 +344,56 @@ class FallbackBenchmark(
         read: List<PhaseResult>,
         sizeRow: DoubleArray
     ) {
-        listOf(write, read).forEach { stats ->
-            val phase = stats.first().phase
-            val perOpP95 = stats.map {
-                it.timeMs / (if (phase == "write") (batch * (1 - readRatio)) else (batch * readRatio))
-            }.p95()
-            val tpsP95 = stats.map { it.tps }.p95()
-            val cpuP95 = stats.map { it.cpu }.p95()
+        fun List<PhaseResult>.persist(phaseName: String, denom: Double) {
+            if (isEmpty()) return
+            val perOpP95 = map { it.timeMs / denom }.p95()
+            val tpsP95 = map { it.tps }.p95()
+            val cpuP95 = map { it.cpu }.p95()
 
-            fun writeRow(sh: org.apache.poi.ss.usermodel.Sheet, rowNum: Int) {
-                sh.createRow(rowNum).apply {
-                    createCell(0).setCellValue(strategy)
-                    createCell(1).setCellValue(blockKiB.toDouble())
-                    createCell(2).setCellValue(chunkKiB.toDouble())
-                    createCell(3).setCellValue(batch.toDouble())
-                    createCell(4).setCellValue(readRatio)
-                    createCell(5).setCellValue(phase)
-                    createCell(6).setCellValue(perOpP95)
-                    createCell(7).setCellValue(tpsP95)
-                    createCell(8).setCellValue(cpuP95)
-                    createCell(9).setCellValue(sizeRow[0] / 1024)
-                    createCell(10).setCellValue(sizeRow[1] / 1024)
-                    createCell(11).setCellValue(sizeRow[2] / 1024)
-                    createCell(12).setCellValue(sizeRow[3] / 1024)
-                }
+            report.persistMetrics(
+                strategy = strategy,
+                blockKiB = blockKiB,
+                chunkKiB = chunkKiB,
+                batch = batch,
+                readRatio = readRatio,
+                phase = phaseName,
+                perOpP95 = perOpP95,
+                tpsP95 = tpsP95,
+                cpuP95 = cpuP95,
+                sizeRow = sizeRow
+            )
+        }
+
+        write.persist("write", batch * (1 - readRatio))
+        read.persist("read", batch * readRatio)
+    }
+
+    private fun List<Double>.p95(): Double =
+        if (isEmpty()) Double.NaN else sorted()[((size * 0.95).toInt()).coerceAtMost(lastIndex)]
+
+    private suspend fun <T> retry(
+        attempts: Int = 10,
+        initialDelayMs: Long = 100,
+        factor: Double = 2.0,
+        block: suspend () -> T
+    ): T {
+        var curDelay = initialDelayMs
+
+        repeat(attempts - 1) { idx ->
+            try {
+                return block()
+            } catch (ex: Exception) {
+                println("retry[${idx + 1}/$attempts] failed: ${ex.message}")
+                delay(curDelay)
+                curDelay = (curDelay * factor).toLong()
             }
+        }
 
-            writeRow(sheet, rowIdx++)
-
-            val sh = sheetForBatch(batch)
-            val idx = batchRowIndex.getValue(batch)
-            writeRow(sh, idx)
-            batchRowIndex[batch] = idx + 1
+        return try {
+            block()
+        } catch (ex: Exception) {
+            println("retry[$attempts/$attempts] failed: ${ex.message}")
+            throw (ex)
         }
     }
 }
