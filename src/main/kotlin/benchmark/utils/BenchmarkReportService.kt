@@ -29,7 +29,8 @@ class BenchmarkReportService {
         }
 
         sizeSheet.createRow(sizeRowIdx++).apply {
-            listOf("blockKiB", "chunkKiB",
+            listOf(
+                "blockKiB", "chunkKiB",
                 "simple_MiB", "cassandra_MiB",
                 "precomp_MiB", "appcomp_MiB"
             ).forEachIndexed { i, h -> createCell(i).setCellValue(h) }
@@ -59,13 +60,17 @@ class BenchmarkReportService {
         cpuP95: Double,
         sizeRow: DoubleArray
     ) {
-        writeRow(sheet, rowIdx++, strategy, blockKiB, chunkKiB, batch, readRatio,
-            phase, perOpP95, tpsP95, cpuP95, sizeRow)
+        writeRow(
+            sheet, rowIdx++, strategy, blockKiB, chunkKiB, batch, readRatio,
+            phase, perOpP95, tpsP95, cpuP95, sizeRow
+        )
 
         val sh = sheetForBatch(batch)
         val idx = batchRowIndex.getValue(batch)
-        writeRow(sh, idx, strategy, blockKiB, chunkKiB, batch, readRatio,
-            phase, perOpP95, tpsP95, cpuP95, sizeRow)
+        writeRow(
+            sh, idx, strategy, blockKiB, chunkKiB, batch, readRatio,
+            phase, perOpP95, tpsP95, cpuP95, sizeRow
+        )
         batchRowIndex[batch] = idx + 1
     }
 

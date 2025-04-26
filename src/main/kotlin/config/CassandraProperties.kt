@@ -13,5 +13,6 @@ data class CassandraProperties(
     var password: String = "cassandra",
     var jmxHost: String = "localhost",
     var jmxPort: Int = 7199,
-    var localDatacenter: String = "datacenter1"
+    var localDatacenter: String = "datacenter1",
+    var timeout: Long = 2
 )

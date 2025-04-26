@@ -3,6 +3,7 @@ package main
 import main.benchmark.CassandraFindAllBenchmark
 import main.benchmark.FallbackBenchmark
 import main.benchmark.ReadBenchmark
+import main.benchmark.SizeBenchmark
 import main.config.*
 import main.runner.CassandraCompressedRunner
 import main.runner.PreCompressedRunner
@@ -25,7 +26,8 @@ class MainRunner(
     private val cassandraCompressedRunner: CassandraCompressedRunner,
     private val pageSizeBenchmark: CassandraFindAllBenchmark,
     private val readBenchmark: ReadBenchmark,
-    private val fallbackBenchmark: FallbackBenchmark
+    private val fallbackBenchmark: FallbackBenchmark,
+    private val sizeBenchmark: SizeBenchmark
 ) : CommandLineRunner {
 
     override fun run(vararg args: String?) {
@@ -69,6 +71,13 @@ class MainRunner(
                         warmUpBursts = benchProps.warmUpBursts,
                         warmUpDelayMs = benchProps.warmUpDelayMs,
                         interBurstDelay = benchProps.interBurstDelayMs
+                    )
+
+                BenchmarkType.size ->
+                    sizeBenchmark.runSizeBenchmark(
+                        ordersCount = benchProps.ordersCount,
+                        blockSizes = benchProps.blockSizes,
+                        chunkSizes = benchProps.chunkSizes
                     )
 
                 else ->

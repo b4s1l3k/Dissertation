@@ -47,5 +47,6 @@ enum class BenchmarkType {
     pageSize,
     parallelism,
     read,
-    fallback
+    fallback,
+    size
 }

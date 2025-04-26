@@ -36,7 +36,6 @@ class ReadBenchmark(
     )
 
     fun runBenchmark(ordersCount: Int) = runBlocking {
-        // Параметры
         val pageSizes = listOf(100, 500, 1000)
         val randomReadCounts = listOf(1_000, 5_000, 10_000)
         val parallelisms = listOf(2, 4, 10)
@@ -45,7 +44,6 @@ class ReadBenchmark(
         val fallbackBatches = listOf(50, 250, 500)
         val fallbackBursts = 100
 
-        // Генерация и предзагрузка
         println("Generating $ordersCount orders...")
         val seed = 12345L
         val orders = generator.generateOrders(ordersCount)
@@ -67,7 +65,6 @@ class ReadBenchmark(
             svc.save(orders)
         }
 
-        // Сценарии
         suspend fun fullScan(svc: CassandraService<SimpleOrderInfo>, pageSize: Int) {
             svc.findAll(pageSize)
         }
@@ -114,10 +111,8 @@ class ReadBenchmark(
             }
         }
 
-        // Собираем результаты
         val results = mutableListOf<BenchmarkResult>()
 
-        // Full scan
         for (ps in pageSizes) {
             services.forEach { (label, svc) ->
                 print("Running fullScan(pageSize=$ps) on $label... ")
@@ -134,7 +129,6 @@ class ReadBenchmark(
             }
         }
 
-        // Random reads
         for (rc in randomReadCounts) {
             val ids = allIds.take(rc)
             for (par in parallelisms) {
@@ -148,13 +142,12 @@ class ReadBenchmark(
                             errors = 1
                         }
                     }
-                    println("${t} ms")
+                    println("$t ms")
                     results += BenchmarkResult(label, "randomReads", "count=$rc,par=$par", t, errors)
                 }
             }
         }
 
-        // Mixed workload
         for (dur in mixedDurations) {
             for (rpw in readsPerWrites) {
                 services.forEach { (label, svc) ->
@@ -167,13 +160,12 @@ class ReadBenchmark(
                             errors = 1
                         }
                     }
-                    println("${t} ms")
+                    println("$t ms")
                     results += BenchmarkResult(label, "mixedWorkload", "dur=${dur}s,rpw=$rpw", t, errors)
                 }
             }
         }
 
-        // Fallback load
         for (batchSize in fallbackBatches) {
             services.forEach { (label, svc) ->
                 print("Running fallback(batch=$batchSize,bursts=$fallbackBursts) on $label... ")
@@ -189,12 +181,11 @@ class ReadBenchmark(
                         }
                     }
                 }
-                println("${t} ms, errors=$errors")
+                println("$t ms, errors=$errors")
                 results += BenchmarkResult(label, "fallback", "batch=$batchSize,bursts=$fallbackBursts", t, errors)
             }
         }
 
-        // Печать итоговой таблицы
         println("\n| Strategy        | Scenario        | Params                      | Time (ms) | Errors |")
         println("|-----------------|-----------------|-----------------------------|-----------|--------|")
         results.forEach { r ->

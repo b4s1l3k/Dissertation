@@ -2,19 +2,8 @@ package main.utils
 
 import com.sun.management.OperatingSystemMXBean
 import org.springframework.stereotype.Service
-import java.lang.management.BufferPoolMXBean
 import java.lang.management.ManagementFactory
-import java.lang.management.MemoryPoolMXBean
-import java.util.concurrent.atomic.AtomicLong
 
-/**
- * Сбор системных метрик JVM.
- *
- * ─ `snap()`   — возвращает пару (wallNs, cpuNs) для точечного снимка.
- * ─ `cpuLoadPct(start, end)` — средняя загрузка CPU (%) между двумя снапами.
- * ─ `sample()` — расширенный срез (старое API), пригоден для моментов,
- *                когда нужна детальная статистика по памяти/CPU.
- */
 @Service
 class JvmMetricsService {
 

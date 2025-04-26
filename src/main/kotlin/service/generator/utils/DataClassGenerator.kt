@@ -3,7 +3,7 @@ package main.service.generator.utils
 import io.github.serpro69.kfaker.Faker
 import main.data.*
 import main.data.Currency
-import org.springframework.stereotype.Component
+import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Instant
@@ -16,7 +16,7 @@ interface DataClassGenerator {
     fun generateOrderInfo(): SimpleOrderInfo
 }
 
-@Component
+@Service
 class DataClassGeneratorImpl : DataClassGenerator {
     private val faker = Faker()
 

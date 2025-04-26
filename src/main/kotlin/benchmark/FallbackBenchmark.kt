@@ -9,6 +9,7 @@ import main.service.cassandra.utils.TableSizeReporter
 import main.service.compression.SnappyCompressionProtocol
 import main.service.generator.DataGenerationService
 import main.utils.JvmMetricsService
+import main.utils.Retry.retry
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.cassandra.core.cql.CqlTemplate
 import org.springframework.stereotype.Service
@@ -20,9 +21,6 @@ private const val DoubleCompressedStrategy = "DoubleCompressed"
 private const val AppCompressedStrategy = "AppCompressed"
 private const val CassCompressedStrategy = "CassCompressed"
 private const val SimpleStrategy = "Simple"
-
-private val snappyStrategies = setOf(AppCompressedStrategy, DoubleCompressedStrategy)
-private val deflateStrategies = setOf(CassCompressedStrategy, DoubleCompressedStrategy)
 
 private const val SimpleTable = "simple_order_info"
 private const val CassandraCompressedTable = "cassandra_order_info"
@@ -92,8 +90,9 @@ class FallbackBenchmark(
                     .mapIndexed { i, o -> o.copy(id = "${o.id}_$i") }
 
                 blockSizes.forEachIndexed { bsIdx, blockB ->
-                    sizeReporter.clearSnapshots()
+
                     clearAllTables()
+                    sizeReporter.clearSnapshots()
 
                     snappy.blockSize = blockB
                     println("\n>>> Snappy.blockSize = $blockB B")
@@ -101,18 +100,17 @@ class FallbackBenchmark(
                     chunkSizes.forEachIndexed { ckIdx, chunkKb ->
                         clearAllTables()
 
-
                         println(" → Deflate chunk_length_in_kb = $chunkKb KiB")
                         alterDeflate(chunkKb)
 
                         val toTest = services.filter { (strategy, _) ->
-                            val usesSnappy = strategy in snappyStrategies
-                            val usesDeflate = strategy in deflateStrategies
-
-                            val blockOk = usesSnappy || strategy in deflateStrategies || bsIdx == 0
-                            val chunkOk = usesDeflate || ckIdx == 0
-
-                            blockOk && chunkOk
+                            when (strategy) {
+                                SimpleStrategy          -> bsIdx == 0 && ckIdx == 0
+                                CassCompressedStrategy  -> bsIdx == 0
+                                AppCompressedStrategy   -> ckIdx == 0
+                                DoubleCompressedStrategy-> true
+                                else -> false
+                            }
                         }
 
                         preload(orders, parallelBursts, toTest)
@@ -276,7 +274,7 @@ class FallbackBenchmark(
 
                         val wStart = jvm.snap()
                         val wTime = measureTimeMillis {
-                            retry(attempts = 20) {
+                            retry {
                                 svc.save(List(writesPerBurst) { orders.random(rnd) })
                             }
                         }
@@ -292,7 +290,7 @@ class FallbackBenchmark(
                         val rStart = jvm.snap()
                         val rTime = measureTimeMillis {
                             val ids = List(readsPerBurst) { orders.random(rnd).id }
-                            retry(attempts = 30) {
+                            retry {
                                 svc.findByIds(ids)
                             }
                         }
@@ -370,30 +368,4 @@ class FallbackBenchmark(
 
     private fun List<Double>.p95(): Double =
         if (isEmpty()) Double.NaN else sorted()[((size * 0.95).toInt()).coerceAtMost(lastIndex)]
-
-    private suspend fun <T> retry(
-        attempts: Int = 10,
-        initialDelayMs: Long = 100,
-        factor: Double = 2.0,
-        block: suspend () -> T
-    ): T {
-        var curDelay = initialDelayMs
-
-        repeat(attempts - 1) { idx ->
-            try {
-                return block()
-            } catch (ex: Exception) {
-                println("retry[${idx + 1}/$attempts] failed: ${ex.message}")
-                delay(curDelay)
-                curDelay = (curDelay * factor).toLong()
-            }
-        }
-
-        return try {
-            block()
-        } catch (ex: Exception) {
-            println("retry[$attempts/$attempts] failed: ${ex.message}")
-            throw (ex)
-        }
-    }
 }
