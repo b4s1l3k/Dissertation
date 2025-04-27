@@ -13,359 +13,257 @@ import main.utils.Retry.retry
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.cassandra.core.cql.CqlTemplate
 import org.springframework.stereotype.Service
-import kotlin.random.Random
+import java.util.*
 import kotlin.system.exitProcess
-import kotlin.system.measureTimeMillis
+import kotlin.system.measureNanoTime
 
-private const val DoubleCompressedStrategy = "DoubleCompressed"
-private const val AppCompressedStrategy = "AppCompressed"
-private const val CassCompressedStrategy = "CassCompressed"
 private const val SimpleStrategy = "Simple"
+private const val CassCompressedStrategy = "CassCompressed"
+private const val AppCompressedStrategy = "AppCompressed"
+private const val DoubleCompressedStrategy = "DoubleCompressed"
 
 private const val SimpleTable = "simple_order_info"
 private const val CassandraCompressedTable = "cassandra_order_info"
 private const val AppCompressedTable = "app_compressed_order_info"
 private const val PrecompressedTable = "precompressed_order_info"
 
+private val StrategyToTable = mapOf(
+    SimpleStrategy to SimpleTable,
+    CassCompressedStrategy to CassandraCompressedTable,
+    AppCompressedStrategy to AppCompressedTable,
+    DoubleCompressedStrategy to PrecompressedTable
+)
+
 @Service
 class FallbackBenchmark(
     private val generator: DataGenerationService,
 
     @Qualifier("simpleCassandraService")
-    private val simpleService: CassandraService<SimpleOrderInfo>,
+    private val simpleSvc: CassandraService<SimpleOrderInfo>,
     @Qualifier("cassandraCompressedService")
-    private val cassandraCompressedService: CassandraService<SimpleOrderInfo>,
+    private val cassSvc: CassandraService<SimpleOrderInfo>,
     @Qualifier("appCompressedService")
-    private val appCompressedService: CassandraService<SimpleOrderInfo>,
+    private val appSvc: CassandraService<SimpleOrderInfo>,
     @Qualifier("appAndCassandraCompressedService")
-    private val doubleCompressedService: CassandraService<SimpleOrderInfo>,
+    private val precompSvc: CassandraService<SimpleOrderInfo>,
 
     private val cql: CqlTemplate,
     private val snappy: SnappyCompressionProtocol,
     private val jvm: JvmMetricsService,
-    private val sizeReporter: TableSizeReporter,
+    private val sizeRp: TableSizeReporter,
     private val report: BenchmarkReportService
 ) {
-    @Volatile
-    private var shutdownRequested = false
-
-    private data class PhaseResult(
-        val phase: String,
-        val timeMs: Long,
-        val tps: Double,
-        var cpu: Double
-    )
+    private data class Phase(val msOpP95: Double, val tpsP95: Double, val cpuP95: Double)
 
     private val services = mapOf(
-        SimpleStrategy to simpleService,
-        CassCompressedStrategy to cassandraCompressedService,
-        AppCompressedStrategy to appCompressedService,
-        DoubleCompressedStrategy to doubleCompressedService
+        SimpleStrategy to simpleSvc,
+        CassCompressedStrategy to cassSvc,
+        AppCompressedStrategy to appSvc,
+        DoubleCompressedStrategy to precompSvc
     )
 
     fun runFallbackBenchmark(
-        ordersCount: Int,
-        batchSizes: List<Int>,
-        readRatios: List<Double>,
-        chunkSizes: List<Int>,
-        blockSizes: List<Int>,
-        bursts: Int,
-        parallelBursts: Int,
-        warmUpBursts: Int,
-        warmUpDelayMs: Long,
-        interBurstDelay: Long,
-        seed: Long = 42L
+        ordersCount : Int,
+        batchSizes  : List<Int>,
+        chunkSizes  : List<Int>,
+        blockSizes  : List<Int>,
+        parallelism : Int,
+        interDelayMs: Long
     ) {
-        val handler = CoroutineExceptionHandler { _, ex ->
-            println("⛔ Cassandra failed: ${ex.message}")
-            shutdownRequested = true
+        val handler = CoroutineExceptionHandler { _, e ->
+            println("⛔ Unhandled error: ${e.message ?: e}")
+            e.printStackTrace()
         }
 
         runBlocking(handler) {
             try {
                 println("=== Generating $ordersCount random orders ===")
-                val startTime = System.currentTimeMillis()
-
                 val orders = generator.generateOrders(ordersCount)
                     .mapIndexed { i, o -> o.copy(id = "${o.id}_$i") }
 
-                blockSizes.forEachIndexed { bsIdx, blockB ->
-
-                    clearAllTables()
-                    sizeReporter.clearSnapshots()
-
+                for ((bsIdx, blockB) in blockSizes.withIndex()) {
                     snappy.blockSize = blockB
                     println("\n>>> Snappy.blockSize = $blockB B")
 
-                    chunkSizes.forEachIndexed { ckIdx, chunkKb ->
-                        clearAllTables()
-
-                        println(" → Deflate chunk_length_in_kb = $chunkKb KiB")
+                    for ((ckIdx, chunkKb) in chunkSizes.withIndex()) {
+                        println("\n → Deflate chunk_length_in_kb = $chunkKb KiB")
                         alterDeflate(chunkKb)
 
-                        val toTest = services.filter { (strategy, _) ->
-                            when (strategy) {
+                        val toTest = services.filter { (str, _) ->
+                            when (str) {
                                 SimpleStrategy          -> bsIdx == 0 && ckIdx == 0
                                 CassCompressedStrategy  -> bsIdx == 0
                                 AppCompressedStrategy   -> ckIdx == 0
                                 DoubleCompressedStrategy-> true
-                                else -> false
+                                else                    -> false
                             }
                         }
 
-                        preload(orders, parallelBursts, toTest)
+                        for (batch in batchSizes) {
+                            for ((strategy, svc) in toTest) {
+                                println("--- $strategy | block=$blockB B | chunk=$chunkKb KiB | batch=$batch ---")
 
-                        val sizesKiB = sizeReporter.fetchTableSizes(
-                            SimpleTable,
-                            CassandraCompressedTable,
-                            PrecompressedTable,
-                            AppCompressedTable
-                        ).mapValues { it.value / 1024.0 }
+                                runCatching {
+                                    truncateAll()
+                                    preloadAll(orders, batch, svc, parallelism)
 
-                        val sizeRow = doubleArrayOf(
-                            sizesKiB[SimpleTable] ?: 0.0,
-                            sizesKiB[CassandraCompressedTable] ?: 0.0,
-                            sizesKiB[PrecompressedTable] ?: 0.0,
-                            sizesKiB[AppCompressedTable] ?: 0.0
-                        )
-
-                        report.writeSizes(blockB / 1024, chunkKb, sizeRow)
-
-                        toTest.forEach { (strategy, svc) ->
-                            readRatios.forEach { rr ->
-                                batchSizes.forEach { batch ->
-                                    runScenario(
-                                        strategy, svc, orders,
-                                        blockB, chunkKb, batch, rr,
-                                        bursts, parallelBursts,
-                                        warmUpBursts, warmUpDelayMs,
-                                        interBurstDelay, seed,
-                                        sizeRow
+                                    val (w, r) = measureRW(
+                                        orders, batch, svc, parallelism, interDelayMs
                                     )
+
+                                    val tbl = StrategyToTable.getValue(strategy)
+                                    sizeRowFor(tbl, blockB, chunkKb, batch)
+                                    persist(strategy, blockB, chunkKb, batch, w, r)
+
+                                    truncateAll()
+                                    sizeRp.clearSnapshots()
+                                }.onFailure { ex ->
+                                    println("⚠️  Batch failed: ${ex.message ?: ex}")
+                                    ex.printStackTrace()
                                 }
                             }
                         }
                     }
                 }
 
-                val elapsed = (System.currentTimeMillis() - startTime) / 1000
-                println("⏱  Total time: ${elapsed / 60} m ${elapsed % 60} s")
+                println("✔ Benchmarks finished")
             } finally {
-                report.saveTo("benchmark_results.xlsx")
-
-                if (shutdownRequested) {
-                    println("✔ Partial results saved, graceful shutdown")
-                } else {
-                    println("✔ All benchmarks completed successfully")
-                }
+                runCatching { report.saveTo() }
 
                 exitProcess(0)
             }
         }
     }
 
-    private suspend fun preload(
+    private suspend fun measureRW(
         orders: List<SimpleOrderInfo>,
-        parallelism: Int,
-        svcMap: Map<String, CassandraService<SimpleOrderInfo>>
-    ) {
-        println("   Preloading ${svcMap.size} tables…")
-        svcMap.forEach { (name, svc) ->
-            println("      → $name")
-            svc.deleteAll()
-            coroutineScope {
-                orders.chunked((orders.size + parallelism - 1) / parallelism).map { chunk ->
-                    launch(Dispatchers.IO) { retry { svc.save(chunk) } }
+        batchSize: Int,
+        svc: CassandraService<SimpleOrderInfo>,
+        parallel: Int,
+        interDelayMs: Long
+    ): Pair<Phase, Phase> {
+
+        fun MutableList<Long>.p95ns(): Long =
+            if (isEmpty()) 0 else sorted()[(size * 0.95).toInt().coerceAtMost(lastIndex)]
+
+        fun MutableList<Double>.p95(): Double =
+            if (isEmpty()) Double.NaN else sorted()[(size * 0.95).toInt().coerceAtMost(lastIndex)]
+
+        val wTimes = Collections.synchronizedList(mutableListOf<Long>())
+        val wCpu = Collections.synchronizedList(mutableListOf<Double>())
+
+        coroutineScope {
+            val sem = Semaphore(parallel)
+            for (slice in orders.chunked(batchSize)) launch(Dispatchers.IO) {
+                sem.acquire()
+                try {
+                    val cpu0 = jvm.snap()
+                    val ns = measureNanoTime { retry { svc.save(slice) } }
+                    wTimes += ns / batchSize
+                    wCpu += jvm.cpuLoadPct(cpu0, jvm.snap())
+                } finally {
+                    sem.release()
                 }
             }
         }
-    }
 
-    private fun clearAllTables() {
-        println()
-        listOf(
-            SimpleTable,
-            CassandraCompressedTable,
-            PrecompressedTable,
-            AppCompressedTable
-        ).forEach { table ->
-            println("✓ TRUNCATE dissertation.$table")
-            cql.execute("TRUNCATE dissertation.$table")
-        }
-    }
+        delay(interDelayMs)
 
-    private fun alterDeflate(chunkKb: Int) {
-        listOf(CassandraCompressedTable, PrecompressedTable).forEach { tbl ->
-            cql.execute(
-                "ALTER TABLE dissertation.$tbl " +
-                        "WITH compression={'class':'org.apache.cassandra.io.compress.DeflateCompressor'," +
-                        "'chunk_length_in_kb':$chunkKb}"
-            )
-            verifyChunkLength(tbl, chunkKb)
-        }
-    }
+        val rTimes = Collections.synchronizedList(mutableListOf<Long>())
+        val rCpu = Collections.synchronizedList(mutableListOf<Double>())
 
-    private fun verifyChunkLength(table: String, expected: Int) {
-        val opts = fetchCompressionOptions(table)
-        val actual = opts["chunk_length_in_kb"]?.toIntOrNull()
-            ?: error("table $table missing chunk_length_in_kb")
-        require(actual == expected) {
-            "Wrong chunk_length_in_kb for $table: $actual, expected $expected"
-        }
-    }
-
-    private fun fetchCompressionOptions(tableName: String): Map<String, String> {
-        val row = cql.queryForList(
-            "SELECT compression FROM system_schema.tables WHERE keyspace_name=? AND table_name=?",
-            "dissertation", tableName
-        ).firstOrNull() ?: error("Не найдена информация о таблице $tableName в system_schema.tables")
-        @Suppress("UNCHECKED_CAST")
-        return row["compression"] as? Map<String, String>
-            ?: error("Поле compression у таблицы $tableName отсутствует или имеет неожиданный тип")
-    }
-
-    private suspend fun runScenario(
-        strategy: String,
-        svc: CassandraService<SimpleOrderInfo>,
-        orders: List<SimpleOrderInfo>,
-        blockSize: Int,
-        chunkKb: Int,
-        batchSize: Int,
-        readRatio: Double,
-        bursts: Int,
-        parallel: Int,
-        warmUpBursts: Int,
-        warmUpDelayMs: Long,
-        interDelayMs: Long,
-        seed: Long,
-        sizeRow: DoubleArray
-    ) {
-        println("--- $strategy | block=$blockSize B | chunk=$chunkKb KiB | batch=$batchSize | read=$readRatio ---")
-
-        val writesPerBurst = (batchSize * (1 - readRatio)).toInt().coerceAtLeast(1)
-        val readsPerBurst = batchSize - writesPerBurst
-
-        repeat(warmUpBursts) { i ->
-            val rnd = Random(seed + i)
-            retry {
-                svc.save(List(writesPerBurst) {
-                    orders.random(rnd)
-                })
-            }
-            retry {
-                svc.findById(orders.random(rnd).id)
-            }
-            delay(warmUpDelayMs)
-        }
-
-        val writeStats = mutableListOf<PhaseResult>()
-        val readStats = mutableListOf<PhaseResult>()
-        val cpuWriteSamples = mutableListOf<Double>()
-        val cpuReadSamples = mutableListOf<Double>()
-
-        val sem = Semaphore(parallel)
-        supervisorScope {
-            repeat(bursts) { i ->
+        coroutineScope {
+            val sem = Semaphore(parallel)
+            for (ids in orders.chunked(batchSize).map { it.map(SimpleOrderInfo::id) })
                 launch(Dispatchers.IO) {
-                    if (shutdownRequested) return@launch
                     sem.acquire()
                     try {
-                        val rnd = Random(seed + warmUpBursts + i)
-
-                        val wStart = jvm.snap()
-                        val wTime = measureTimeMillis {
-                            retry {
-                                svc.save(List(writesPerBurst) { orders.random(rnd) })
-                            }
-                        }
-                        val wCpu = jvm.cpuLoadPct(wStart, jvm.snap())
-                        writeStats += PhaseResult(
-                            phase = "write",
-                            timeMs = wTime,
-                            tps = if (wTime > 0) writesPerBurst * 1_000.0 / wTime else 0.0,
-                            cpu = wCpu
-                        )
-                        cpuWriteSamples += wCpu
-
-                        val rStart = jvm.snap()
-                        val rTime = measureTimeMillis {
-                            val ids = List(readsPerBurst) { orders.random(rnd).id }
-                            retry {
-                                svc.findByIds(ids)
-                            }
-                        }
-                        val rCpu = jvm.cpuLoadPct(rStart, jvm.snap())
-                        synchronized(readStats) {
-                            readStats += PhaseResult(
-                                "read",
-                                rTime,
-                                if (rTime > 0) readsPerBurst * 1_000.0 / rTime else 0.0,
-                                rCpu
-                            )
-                            cpuReadSamples += rCpu
-                        }
-                    } catch (ex: Exception) {
-                        println("⛔ burst $i failed: ${ex.message}")
-                        shutdownRequested = true
+                        val cpu0 = jvm.snap()
+                        val ns = measureNanoTime { retry { svc.findByIds(ids) } }
+                        rTimes += ns / batchSize
+                        rCpu += jvm.cpuLoadPct(cpu0, jvm.snap())
                     } finally {
                         sem.release()
                     }
-                    delay(interDelayMs)
                 }
-            }
         }
 
-        val cpuWriteP95 = cpuWriteSamples.p95()
-        val cpuReadP95 = cpuReadSamples.p95()
-        writeStats.forEach { it.cpu = cpuWriteP95 }
-        readStats.forEach { it.cpu = cpuReadP95 }
-
-        persistMetrics(
-            strategy = strategy,
-            blockKiB = blockSize / 1024,
-            chunkKiB = chunkKb,
-            batch = batchSize,
-            readRatio = readRatio,
-            write = writeStats,
-            read = readStats,
-            sizeRow = sizeRow
-        )
+        fun phase(nsList: MutableList<Long>, cpuList: MutableList<Double>): Phase {
+            val op95µs = nsList.p95ns() / 1_000.0
+            val tps95 = if (op95µs > 0) 1_000_000.0 / op95µs else 0.0
+            return Phase(op95µs, tps95, cpuList.p95())
+        }
+        return phase(wTimes, wCpu) to phase(rTimes, rCpu)
     }
 
-    private fun persistMetrics(
-        strategy: String,
-        blockKiB: Int,
-        chunkKiB: Int,
+    private suspend fun preloadAll(
+        orders: List<SimpleOrderInfo>,
         batch: Int,
-        readRatio: Double,
-        write: List<PhaseResult>,
-        read: List<PhaseResult>,
-        sizeRow: DoubleArray
-    ) {
-        fun List<PhaseResult>.persist(phaseName: String, denom: Double) {
-            if (isEmpty()) return
-            val perOpP95 = map { it.timeMs / denom }.p95()
-            val tpsP95 = map { it.tps }.p95()
-            val cpuP95 = map { it.cpu }.p95()
+        svc: CassandraService<SimpleOrderInfo>,
+        par: Int
+    ) = coroutineScope {
+        val sem = Semaphore(par)
+        for (slice in orders.chunked(batch)) launch(Dispatchers.IO) {
+            sem.acquire(); try {
+            retry { svc.save(slice) }
+        } finally {
+            sem.release()
+        }
+        }
+    }
 
+    private fun sizeRowFor(
+        table: String,
+        blockB: Int,
+        chunkK: Int,
+        batch: Int
+    ): DoubleArray {
+        val sizeKiB = sizeRp.fetchTableSizes(table)[table]!! / 1024.0
+        val sz = DoubleArray(4)
+        when (table) {
+            SimpleTable -> sz[0] = sizeKiB
+            CassandraCompressedTable -> sz[1] = sizeKiB
+            PrecompressedTable -> sz[2] = sizeKiB
+            AppCompressedTable -> sz[3] = sizeKiB
+        }
+        report.writeSizes(blockB / 1024, chunkK, batch, sz)
+        return sz
+    }
+
+    private fun persist(
+        strategy: String,
+        blockB: Int,
+        chunkK: Int,
+        batch: Int,
+        write: Phase,
+        read: Phase
+    ) {
+        fun Phase.persist(phaseName: String) =
             report.persistMetrics(
-                strategy = strategy,
-                blockKiB = blockKiB,
-                chunkKiB = chunkKiB,
-                batch = batch,
-                readRatio = readRatio,
-                phase = phaseName,
-                perOpP95 = perOpP95,
-                tpsP95 = tpsP95,
-                cpuP95 = cpuP95,
-                sizeRow = sizeRow
+                strategy,
+                blockB / 1024,
+                chunkK,
+                batch,
+                phaseName,
+                this.msOpP95,
+                this.tpsP95,
+                this.cpuP95
+            )
+
+        write.persist("write")
+        read.persist("read")
+    }
+
+    private fun truncateAll() = listOf(
+        SimpleTable, CassandraCompressedTable, PrecompressedTable, AppCompressedTable
+    ).forEach { cql.execute("TRUNCATE dissertation.$it") }
+
+    private fun alterDeflate(chunkKb: Int) =
+        listOf(CassandraCompressedTable, PrecompressedTable).forEach {
+            cql.execute(
+                "ALTER TABLE dissertation.$it " +
+                        "WITH compression={'class':'org.apache.cassandra.io.compress.DeflateCompressor'," +
+                        "'chunk_length_in_kb':$chunkKb}"
             )
         }
-
-        write.persist("write", batch * (1 - readRatio))
-        read.persist("read", batch * readRatio)
-    }
-
-    private fun List<Double>.p95(): Double =
-        if (isEmpty()) Double.NaN else sorted()[((size * 0.95).toInt()).coerceAtMost(lastIndex)]
 }

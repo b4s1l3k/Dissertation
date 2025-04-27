@@ -3,7 +3,7 @@ package main
 import main.benchmark.CassandraFindAllBenchmark
 import main.benchmark.FallbackBenchmark
 import main.benchmark.ReadBenchmark
-import main.benchmark.SizeBenchmark
+//import main.benchmark.SizeBenchmark
 import main.config.*
 import main.runner.CassandraCompressedRunner
 import main.runner.PreCompressedRunner
@@ -27,7 +27,7 @@ class MainRunner(
     private val pageSizeBenchmark: CassandraFindAllBenchmark,
     private val readBenchmark: ReadBenchmark,
     private val fallbackBenchmark: FallbackBenchmark,
-    private val sizeBenchmark: SizeBenchmark
+//    private val sizeBenchmark: SizeBenchmark
 ) : CommandLineRunner {
 
     override fun run(vararg args: String?) {
@@ -63,22 +63,18 @@ class MainRunner(
                     fallbackBenchmark.runFallbackBenchmark(
                         ordersCount = benchProps.ordersCount,
                         batchSizes = benchProps.batchSizes,
-                        readRatios = benchProps.readRatios,
                         chunkSizes = benchProps.chunkSizes,
                         blockSizes = benchProps.blockSizes,
-                        bursts = benchProps.bursts,
-                        parallelBursts = benchProps.parallelBursts,
-                        warmUpBursts = benchProps.warmUpBursts,
-                        warmUpDelayMs = benchProps.warmUpDelayMs,
-                        interBurstDelay = benchProps.interBurstDelayMs
+                        parallelism = benchProps.parallelBursts,
+                        interDelayMs = benchProps.interBurstDelayMs
                     )
-
-                BenchmarkType.size ->
-                    sizeBenchmark.runSizeBenchmark(
-                        ordersCount = benchProps.ordersCount,
-                        blockSizes = benchProps.blockSizes,
-                        chunkSizes = benchProps.chunkSizes
-                    )
+//
+//                BenchmarkType.size ->
+//                    sizeBenchmark.runSizeBenchmark(
+//                        ordersCount = benchProps.ordersCount,
+//                        blockSizes = benchProps.blockSizes,
+//                        chunkSizes = benchProps.chunkSizes
+//                    )
 
                 else ->
                     println("Benchmark ${appProps.benchmarkType} пока не реализован")

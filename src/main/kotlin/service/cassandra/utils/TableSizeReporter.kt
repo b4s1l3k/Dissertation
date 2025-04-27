@@ -45,7 +45,7 @@ class TableSizeReporter(
                 )
             }
 
-            println("✅ [TableSizeReporter] Measurement complete.\n")
+            println("✅ [TableSizeReporter] Measurement complete.")
             return tables.associateWith { tbl ->
                 getFromMetricsJmx(mbs, ks, tbl)
                     ?: getFromLegacyJmx(mbs, ks, tbl)
@@ -68,7 +68,7 @@ class TableSizeReporter(
                 arrayOf<Any>("", arrayOf<String>()),
                 arrayOf("java.lang.String", "[Ljava.lang.String;")
             )
-            println("\n✓ All snapshots cleared")
+            println("✓ All snapshots cleared")
         }
     }
 
