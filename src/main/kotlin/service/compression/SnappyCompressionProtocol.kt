@@ -18,8 +18,8 @@ class SnappyCompressionProtocol(@Value("\${compression.snappy.blockSize}") var b
     override fun compressData(data: ByteArray): ByteArray {
         val output = ByteArrayOutputStream()
         ByteArrayInputStream(data).use { input ->
-            SnappyOutputStream(output).use { snappyOut ->
-                input.copyTo(snappyOut, blockSize)
+            SnappyOutputStream(output, blockSize).use { snappyOut ->
+                input.copyTo(snappyOut, DEFAULT_BUFFER_SIZE)
             }
         }
         return output.toByteArray()
@@ -28,7 +28,7 @@ class SnappyCompressionProtocol(@Value("\${compression.snappy.blockSize}") var b
     override fun decompressData(data: ByteArray): ByteArray {
         val output = ByteArrayOutputStream()
         SnappyInputStream(ByteArrayInputStream(data)).use { snappyIn ->
-            snappyIn.copyTo(output, blockSize)
+            snappyIn.copyTo(output, DEFAULT_BUFFER_SIZE)
         }
         return output.toByteArray()
     }
