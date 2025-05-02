@@ -99,6 +99,21 @@ class FallbackBenchmark(
                             }
                         }
 
+//                        val toTest = services.filter { (strategy, _) ->
+//                            strategy == CassCompressedStrategy && bsIdx == 0
+//                        }
+
+//                        val toTest = services.filter { (strategy, _) ->
+//                            strategy == AppCompressedStrategy && ckIdx == 0
+//                        }
+
+//                        val toTest = services.filter { (strategy, _) ->
+//                            when (strategy) {
+//                                DoubleCompressedStrategy    -> true
+//                                else                     -> false
+//                            }
+//                        }
+
                         for (batch in batchSizes) {
                             for ((strategy, svc) in toTest) {
                                 println("--- $strategy | block=$blockB B | chunk=$chunkKb KiB | batch=$batch ---")
